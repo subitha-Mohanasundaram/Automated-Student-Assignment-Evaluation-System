@@ -1,0 +1,77 @@
+name: Send Result Email
+
+on:
+  workflow_run:
+    workflows: ["Evaluate Submission"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  email-result:
+    name: Send Evaluation Email
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download evaluation artifact
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          run_id: ${{ github.event.workflow_run.id }}
+          name: eval-${{ github.event.workflow_run.id }}
+          path: artifacts
+          if_no_artifact_found: fail
+
+      - name: Resolve student details
+        id: student
+        shell: bash
+        run: |
+          ACTOR=$(cat artifacts/actor.txt)
+          LINE=$(awk -F, -v u="$ACTOR" '$1==u {print $0}' students.csv)
+          if [ -z "$LINE" ]; then
+            echo "No student mapping found for GitHub user: $ACTOR"
+            exit 1
+          fi
+
+          NAME=$(echo "$LINE" | awk -F, '{print $2}')
+          EMAIL=$(echo "$LINE" | awk -F, '{print $3}')
+          if [ -z "$EMAIL" ]; then
+            echo "Email is empty for GitHub user: $ACTOR"
+            exit 1
+          fi
+
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "email=$EMAIL" >> "$GITHUB_OUTPUT"
+          echo "actor=$ACTOR" >> "$GITHUB_OUTPUT"
+
+      - name: Send result email
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+          SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
+        run: |
+          python email_sender.py "${{ steps.student.outputs.email }}" --student-name "${{ steps.student.outputs.name }}" --result-file artifacts/result.txt --subject "Assignment Evaluation Result"
+
+      - name: Print delivery summary
+        run: |
+          echo "Email attempted for GitHub user: ${{ steps.student.outputs.actor }}"
+          echo "Recipient: ${{ steps.student.outputs.email }}"
