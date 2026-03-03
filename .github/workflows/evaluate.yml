@@ -35,10 +35,12 @@ jobs:
         id: submission
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          ACTOR="${{ github.actor }}"
+
+          # Prefer the current actor's submission folder for predictable selection.
+          FILE=$(find "submissions/$ACTOR" -type f -name "*.py" 2>/dev/null | head -n1 || true)
+          if [ -z "$FILE" ]; then
             FILE=$(find submissions -type f -name "*.py" | head -n1 || true)
-          else
-            FILE=$(git diff-tree --no-commit-id --name-only -r "${{ github.sha }}" | grep '^submissions/.*\.py$' | head -n1 || true)
           fi
 
           if [ -z "$FILE" ]; then
@@ -47,7 +49,7 @@ jobs:
           fi
 
           echo "file=$FILE" >> "$GITHUB_OUTPUT"
-          echo "actor=${{ github.actor }}" >> "$GITHUB_OUTPUT"
+          echo "actor=$ACTOR" >> "$GITHUB_OUTPUT"
           echo "Selected submission file: $FILE"
 
       - name: Evaluate submission
@@ -60,6 +62,13 @@ jobs:
           mkdir -p artifacts
           echo "${{ steps.submission.outputs.actor }}" > artifacts/actor.txt
           cp result.txt artifacts/result.txt
+
+      - name: Publish score summary
+        shell: bash
+        run: |
+          echo "## Evaluation Result" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          cat result.txt >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload evaluation artifacts
         uses: actions/upload-artifact@v4

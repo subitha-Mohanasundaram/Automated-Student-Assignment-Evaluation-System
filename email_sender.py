@@ -62,9 +62,14 @@ def build_message(
     message["Subject"] = subject
     message["From"] = sender_email
     message["To"] = recipient_email
+    result_text = result_file.read_text(encoding="utf-8").strip()
+
     message.set_content(
         f"Hello {student_name},\n\n"
-        "Please find attached your assignment evaluation report.\n\n"
+        "Your submission has been evaluated successfully.\n\n"
+        "Score details:\n"
+        f"{result_text}\n\n"
+        "Please also find the same report attached.\n\n"
         "Regards,\n"
         "Automated Evaluation System"
     )
