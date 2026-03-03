@@ -1,0 +1,12 @@
+[
+  {
+    "student_name": "Alice",
+    "obtained_points": [8, 7, 9],
+    "max_points": [10, 10, 10]
+  },
+  {
+    "student_name": "Bob",
+    "obtained_points": [5, 6, 4],
+    "max_points": [10, 10, 10]
+  }
+]
