@@ -141,6 +141,7 @@ jobs:
           echo "${{ steps.submission.outputs.file }}" > artifacts/file.txt
           echo "${{ steps.submission.outputs.lang }}" > artifacts/lang.txt
           cp result.txt artifacts/result.txt
+          if [ -f result.json ]; then cp result.json artifacts/result.json; fi
 
       - name: Publish score summary
         shell: bash
@@ -165,6 +166,7 @@ jobs:
           name: eval-${{ github.run_id }}
           path: |
             artifacts/result.txt
+            artifacts/result.json
             artifacts/actor.txt
             artifacts/file.txt
             artifacts/lang.txt

@@ -29,6 +29,12 @@ class TestSummary:
     anti_cheat_violations: list[str] | None = None
     plagiarism_detected: bool = False
     plagiarism_matches: list[str] | None = None
+    visible_weight: float = 0.6
+    hidden_weight: float = 0.4
+    visible_score_percent: float = 0.0
+    hidden_score_percent: float = 0.0
+    weighted_visible_contribution: float = 0.0
+    weighted_hidden_contribution: float = 0.0
 
 
 @dataclass
@@ -129,12 +135,25 @@ def _weighted_score(
     hidden_passed: int,
     hidden_total: int,
     scoring: dict[str, float],
-) -> float:
+) -> tuple[float, float, float, float, float, float, float]:
     visible_weight = float(scoring.get("visible_weight", 0.6))
     hidden_weight = float(scoring.get("hidden_weight", 0.4))
     visible_ratio = (visible_passed / visible_total) if visible_total else 0.0
     hidden_ratio = (hidden_passed / hidden_total) if hidden_total else 0.0
-    return round((visible_ratio * visible_weight + hidden_ratio * hidden_weight) * 100, 2)
+    visible_score_percent = round(visible_ratio * 100, 2)
+    hidden_score_percent = round(hidden_ratio * 100, 2)
+    weighted_visible_contribution = round(visible_ratio * visible_weight * 100, 2)
+    weighted_hidden_contribution = round(hidden_ratio * hidden_weight * 100, 2)
+    final_score = round(weighted_visible_contribution + weighted_hidden_contribution, 2)
+    return (
+        final_score,
+        visible_weight,
+        hidden_weight,
+        visible_score_percent,
+        hidden_score_percent,
+        weighted_visible_contribution,
+        weighted_hidden_contribution,
+    )
 
 
 def _write_result(
@@ -158,6 +177,12 @@ def _write_result(
         f"Passed Cases: {summary.passed}\n"
         f"Visible Passed: {summary.visible_passed}/{summary.visible_total}\n"
         f"Hidden Passed: {summary.hidden_passed}/{summary.hidden_total}\n"
+        f"Visible Weight: {summary.visible_weight}\n"
+        f"Hidden Weight: {summary.hidden_weight}\n"
+        f"Visible Score Percent: {summary.visible_score_percent}\n"
+        f"Hidden Score Percent: {summary.hidden_score_percent}\n"
+        f"Weighted Visible Contribution: {summary.weighted_visible_contribution}\n"
+        f"Weighted Hidden Contribution: {summary.weighted_hidden_contribution}\n"
         f"Anti-Cheat: {anti_cheat_status}\n"
         f"Plagiarism: {plagiarism_status}\n"
         f"Score: {summary.score}\n"
@@ -171,6 +196,48 @@ def _write_result(
         for item in matches:
             content += f"- {item}\n"
     result_file.write_text(content, encoding="utf-8")
+
+
+def _write_result_json(
+    result_file: Path,
+    student_name: str,
+    problem_id: str,
+    language: str,
+    summary: TestSummary,
+) -> Path:
+    payload = {
+        "student_name": student_name,
+        "problem_id": problem_id,
+        "language": language,
+        "total_test_cases": summary.total,
+        "passed_cases": summary.passed,
+        "visible": {
+            "passed": summary.visible_passed,
+            "total": summary.visible_total,
+            "weight": summary.visible_weight,
+            "score_percent": summary.visible_score_percent,
+            "weighted_contribution": summary.weighted_visible_contribution,
+        },
+        "hidden": {
+            "passed": summary.hidden_passed,
+            "total": summary.hidden_total,
+            "weight": summary.hidden_weight,
+            "score_percent": summary.hidden_score_percent,
+            "weighted_contribution": summary.weighted_hidden_contribution,
+        },
+        "anti_cheat": {
+            "passed": summary.anti_cheat_passed,
+            "violations": summary.anti_cheat_violations or [],
+        },
+        "plagiarism": {
+            "detected": summary.plagiarism_detected,
+            "matches": summary.plagiarism_matches or [],
+        },
+        "score": summary.score,
+    }
+    json_path = result_file.with_suffix(".json")
+    json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return json_path
 
 
 def _run_pytest(student_file: Path, test_file: Path, junit_xml_path: Path) -> subprocess.CompletedProcess[str]:
@@ -446,7 +513,15 @@ public class JavaEvaluatorHarness {{
 
     total = visible_total + hidden_total
     passed = visible_passed + hidden_passed
-    score = _weighted_score(visible_passed, visible_total, hidden_passed, hidden_total, config.scoring)
+    (
+        score,
+        visible_weight,
+        hidden_weight,
+        visible_score_percent,
+        hidden_score_percent,
+        weighted_visible_contribution,
+        weighted_hidden_contribution,
+    ) = _weighted_score(visible_passed, visible_total, hidden_passed, hidden_total, config.scoring)
     return TestSummary(
         total=total,
         passed=passed,
@@ -455,6 +530,12 @@ public class JavaEvaluatorHarness {{
         visible_passed=visible_passed,
         hidden_total=hidden_total,
         hidden_passed=hidden_passed,
+        visible_weight=visible_weight,
+        hidden_weight=hidden_weight,
+        visible_score_percent=visible_score_percent,
+        hidden_score_percent=hidden_score_percent,
+        weighted_visible_contribution=weighted_visible_contribution,
+        weighted_hidden_contribution=weighted_hidden_contribution,
     )
 
 
@@ -491,7 +572,15 @@ def _evaluate_python(student_file: Path, config: ProblemConfig) -> TestSummary:
 
     combined_total = visible_summary.total + hidden_summary.total
     combined_passed = visible_summary.passed + hidden_summary.passed
-    score = _weighted_score(
+    (
+        score,
+        visible_weight,
+        hidden_weight,
+        visible_score_percent,
+        hidden_score_percent,
+        weighted_visible_contribution,
+        weighted_hidden_contribution,
+    ) = _weighted_score(
         visible_summary.passed,
         visible_summary.total,
         hidden_summary.passed,
@@ -506,6 +595,12 @@ def _evaluate_python(student_file: Path, config: ProblemConfig) -> TestSummary:
         visible_passed=visible_summary.passed,
         hidden_total=hidden_summary.total,
         hidden_passed=hidden_summary.passed,
+        visible_weight=visible_weight,
+        hidden_weight=hidden_weight,
+        visible_score_percent=visible_score_percent,
+        hidden_score_percent=hidden_score_percent,
+        weighted_visible_contribution=weighted_visible_contribution,
+        weighted_hidden_contribution=weighted_hidden_contribution,
     )
 
 
@@ -559,6 +654,7 @@ def evaluate_student(
             plagiarism_matches=plagiarism_matches,
         )
         _write_result(result_file=result_file, student_name=student_name, problem_id=problem_id, language=language, summary=summary)
+        _write_result_json(result_file=result_file, student_name=student_name, problem_id=problem_id, language=language, summary=summary)
         _append_attempt_history(
             repo_root,
             username=username,
@@ -590,6 +686,7 @@ def evaluate_student(
         summary.score = max(round(summary.score * 0.7, 2), 0.0)
 
     _write_result(result_file=result_file, student_name=student_name, problem_id=problem_id, language=language, summary=summary)
+    json_path = _write_result_json(result_file=result_file, student_name=student_name, problem_id=problem_id, language=language, summary=summary)
     _append_attempt_history(
         repo_root,
         username=username,
@@ -601,6 +698,7 @@ def evaluate_student(
         fingerprint=fingerprint,
     )
     print(f"Result saved to: {result_file}")
+    print(f"Result JSON saved to: {json_path}")
     return 0
 
 

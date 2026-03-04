@@ -46,6 +46,11 @@ python evaluator.py path\\to\\student_solution.py --result-file results\\result.
 - Passed Cases
 - Score
 
+Transparent scoring output:
+
+- `result.txt`: human-readable breakdown
+- `result.json`: structured scoring details (weights, contributions, anti-cheat, plagiarism)
+
 ## Run Project Tests
 
 ```bash
