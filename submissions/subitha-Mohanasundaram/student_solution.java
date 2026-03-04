@@ -3,4 +3,3 @@ public class student_solution {
         return a + b;
     }
 }
-// realtime-java-test
