@@ -56,11 +56,12 @@ def find_submission_files(submissions_dir: Path) -> list[tuple[str, Path]]:
         return pairs
 
     for student_dir in sorted(p for p in submissions_dir.iterdir() if p.is_dir()):
-        py_files = sorted(student_dir.rglob("*.py"))
-        if not py_files:
+        code_files = sorted(list(student_dir.rglob("*.py")) + list(student_dir.rglob("*.java")))
+        if not code_files:
             continue
-        # Use the first Python file as canonical submission for now.
-        pairs.append((student_dir.name, py_files[0]))
+        # Prefer Python first for backward compatibility, else Java.
+        code_files.sort(key=lambda p: (0 if p.suffix.lower() == ".py" else 1, str(p)))
+        pairs.append((student_dir.name, code_files[0]))
     return pairs
 
 

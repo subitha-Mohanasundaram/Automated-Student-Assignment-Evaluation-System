@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - "submissions/**.py"
+      - "submissions/**.java"
       - "students.csv"
 
 permissions:

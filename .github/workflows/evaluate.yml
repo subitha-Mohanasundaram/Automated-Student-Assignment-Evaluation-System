@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "submissions/**.py"
+      - "submissions/**.java"
   workflow_dispatch:
 
 permissions:
@@ -26,9 +27,9 @@ jobs:
           ACTOR="${{ github.actor }}"
 
           # Prefer the current actor's submission folder for predictable selection.
-          FILE=$(find "submissions/$ACTOR" -type f -name "*.py" 2>/dev/null | head -n1 || true)
+          FILE=$(find "submissions/$ACTOR" -type f \( -name "*.py" -o -name "*.java" \) 2>/dev/null | head -n1 || true)
           if [ -z "$FILE" ]; then
-            FILE=$(find submissions -type f -name "*.py" | head -n1 || true)
+            FILE=$(find submissions -type f \( -name "*.py" -o -name "*.java" \) | head -n1 || true)
           fi
 
           if [ -z "$FILE" ]; then

@@ -88,11 +88,18 @@ In GitHub repo: `Settings -> Secrets and variables -> Actions -> New repository 
 
 ### Submission path format
 
-Students must push Python files in:
+Students can push Python or Java files in:
 
 ```text
 submissions/<github-username>/student_solution.py
+submissions/<github-username>/student_solution.java
 ```
+
+Java submission contract (current version):
+
+- Must define a public class with a static method:
+  `addNumbers(double a, double b)`
+- Evaluator compiles with `javac` and runs visible + hidden Java test cases.
 
 ### How to test end-to-end
 
