@@ -1,0 +1,186 @@
+"""Batch evaluation and dashboard generation for all student submissions."""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import subprocess
+import sys
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+
+@dataclass
+class BatchRow:
+    github_username: str
+    student_name: str
+    email: str
+    submission_file: str
+    anti_cheat: str
+    total_test_cases: int
+    passed_cases: int
+    visible_passed: str
+    hidden_passed: str
+    score: float
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Generate batch dashboard for all submissions.")
+    parser.add_argument("--submissions-dir", default="submissions", help="Directory with student submissions")
+    parser.add_argument("--students-file", default="students.csv", help="Student mapping CSV path")
+    parser.add_argument("--output-dir", default="results/batch", help="Output directory for batch reports")
+    return parser.parse_args()
+
+
+def load_students_map(students_file: Path) -> dict[str, tuple[str, str]]:
+    if not students_file.exists():
+        return {}
+
+    mapping: dict[str, tuple[str, str]] = {}
+    with students_file.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            username = (row.get("github_username") or "").strip()
+            if not username:
+                continue
+            name = (row.get("student_name") or username).strip() or username
+            email = (row.get("email") or "").strip()
+            mapping[username] = (name, email)
+    return mapping
+
+
+def find_submission_files(submissions_dir: Path) -> list[tuple[str, Path]]:
+    pairs: list[tuple[str, Path]] = []
+    if not submissions_dir.exists():
+        return pairs
+
+    for student_dir in sorted(p for p in submissions_dir.iterdir() if p.is_dir()):
+        py_files = sorted(student_dir.rglob("*.py"))
+        if not py_files:
+            continue
+        # Use the first Python file as canonical submission for now.
+        pairs.append((student_dir.name, py_files[0]))
+    return pairs
+
+
+def parse_result_file(result_file: Path) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for line in result_file.read_text(encoding="utf-8").splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        parsed[key.strip()] = value.strip()
+    return parsed
+
+
+def run_single_evaluation(submission_file: Path, student_name: str, result_file: Path) -> None:
+    cmd = [
+        sys.executable,
+        "evaluator.py",
+        str(submission_file),
+        "--student-name",
+        student_name,
+        "--result-file",
+        str(result_file),
+    ]
+    process = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if process.stdout:
+        print(process.stdout.strip())
+    if process.stderr:
+        print(process.stderr.strip())
+    if process.returncode != 0:
+        raise RuntimeError(f"Evaluation failed for {submission_file}")
+
+
+def write_csv(rows: list[BatchRow], csv_path: Path) -> None:
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with csv_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(asdict(rows[0]).keys()) if rows else list(BatchRow.__annotations__.keys()))
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(asdict(row))
+
+
+def write_json(rows: list[BatchRow], json_path: Path) -> None:
+    payload = [asdict(row) for row in rows]
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def write_dashboard_markdown(rows: list[BatchRow], md_path: Path) -> None:
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    total = len(rows)
+    passed = sum(1 for row in rows if row.score >= 80.0 and row.anti_cheat == "PASS")
+    avg = round(sum(row.score for row in rows) / total, 2) if total else 0.0
+
+    lines = [
+        "# Batch Evaluation Dashboard",
+        "",
+        f"- Total submissions: {total}",
+        f"- Passed threshold (>=80 and anti-cheat PASS): {passed}",
+        f"- Average score: {avg}",
+        "",
+        "| GitHub Username | Student Name | Anti-Cheat | Passed Cases | Score |",
+        "|---|---|---|---:|---:|",
+    ]
+    for row in rows:
+        lines.append(
+            f"| {row.github_username} | {row.student_name} | {row.anti_cheat} | "
+            f"{row.passed_cases}/{row.total_test_cases} | {row.score} |"
+        )
+
+    md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def main() -> int:
+    args = parse_args()
+    submissions_dir = Path(args.submissions_dir).resolve()
+    students_file = Path(args.students_file).resolve()
+    output_dir = Path(args.output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    students_map = load_students_map(students_file)
+    submissions = find_submission_files(submissions_dir)
+    if not submissions:
+        print("No submissions found for batch reporting.")
+        return 1
+
+    rows: list[BatchRow] = []
+    for username, submission_file in submissions:
+        mapped_name, mapped_email = students_map.get(username, (username, ""))
+        result_file = output_dir / f"{username}_result.txt"
+        run_single_evaluation(submission_file=submission_file, student_name=mapped_name, result_file=result_file)
+        parsed = parse_result_file(result_file)
+
+        row = BatchRow(
+            github_username=username,
+            student_name=parsed.get("Student Name", mapped_name),
+            email=mapped_email,
+            submission_file=str(submission_file.relative_to(Path.cwd())),
+            anti_cheat=parsed.get("Anti-Cheat", "UNKNOWN"),
+            total_test_cases=int(parsed.get("Total Test Cases", "0")),
+            passed_cases=int(parsed.get("Passed Cases", "0")),
+            visible_passed=parsed.get("Visible Passed", "0/0"),
+            hidden_passed=parsed.get("Hidden Passed", "0/0"),
+            score=float(parsed.get("Score", "0")),
+        )
+        rows.append(row)
+
+    csv_path = output_dir / "batch_report.csv"
+    json_path = output_dir / "batch_report.json"
+    md_path = output_dir / "dashboard.md"
+
+    write_csv(rows, csv_path)
+    write_json(rows, json_path)
+    write_dashboard_markdown(rows, md_path)
+
+    print(f"Batch report generated for {len(rows)} submission(s).")
+    print(f"CSV: {csv_path}")
+    print(f"JSON: {json_path}")
+    print(f"Dashboard: {md_path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

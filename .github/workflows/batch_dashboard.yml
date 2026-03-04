@@ -1,0 +1,57 @@
+name: Batch Dashboard Report
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "submissions/**.py"
+      - "students.csv"
+
+permissions:
+  contents: read
+
+jobs:
+  batch-report:
+    name: Generate Batch Dashboard
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build grader sandbox image
+        run: |
+          docker build -f Dockerfile.grader -t assignment-grader:latest .
+
+      - name: Generate batch report in Docker sandbox
+        run: |
+          docker run --rm \
+            --network none \
+            --cpus="1.0" \
+            --memory="768m" \
+            --pids-limit=256 \
+            --security-opt no-new-privileges \
+            -v "${PWD}:/workspace" \
+            -w /workspace \
+            assignment-grader:latest \
+            python batch_report.py --submissions-dir submissions --students-file students.csv --output-dir results/batch
+
+      - name: Publish dashboard summary
+        shell: bash
+        run: |
+          echo "## Batch Evaluation Dashboard" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          cat results/batch/dashboard.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload batch artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: batch-report-${{ github.run_id }}
+          path: |
+            results/batch/batch_report.csv
+            results/batch/batch_report.json
+            results/batch/dashboard.md
+            results/batch/*_result.txt
+          if-no-files-found: error
+          retention-days: 14

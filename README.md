@@ -120,3 +120,23 @@ Evaluation now runs inside Docker in GitHub Actions with:
 - no new privileges (`--security-opt no-new-privileges`)
 
 This reduces risk from untrusted student code and is suitable for interview-style coding assessment automation.
+
+## Batch Dashboard Reporting
+
+Use batch reporting to evaluate all student submissions and generate dashboard files:
+
+- `results/batch/batch_report.csv`
+- `results/batch/batch_report.json`
+- `results/batch/dashboard.md`
+
+Run locally:
+
+```bash
+python batch_report.py --submissions-dir submissions --students-file students.csv --output-dir results/batch
+```
+
+GitHub workflow:
+
+- `.github/workflows/batch_dashboard.yml`
+- Trigger: `workflow_dispatch` or push to `submissions/**.py` / `students.csv`
+- Runs inside Docker sandbox and uploads batch artifacts
