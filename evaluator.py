@@ -45,8 +45,8 @@ class ProblemConfig:
     python_visible_test: str
     python_hidden_test: str
     java_contract: dict[str, str]
-    java_visible_cases: list[list[float]]
-    java_hidden_cases: list[list[float]]
+    java_visible_cases: list[list[object]]
+    java_hidden_cases: list[list[object]]
 
 
 def parse_args() -> argparse.Namespace:
@@ -405,13 +405,15 @@ def _evaluate_java(student_file: Path, config: ProblemConfig) -> TestSummary:
 
     source = student_file.read_text(encoding="utf-8")
     class_name = _extract_java_public_class_name(source)
-    expected_method = config.java_contract.get("method_name", "addNumbers")
+    expected_method = config.java_contract.get("method_name", "solve")
     expected_static = "true" if config.java_contract.get("static", True) else "false"
+    eval_mode = config.java_contract.get("mode", "double_binary")
 
     visible_cases = config.java_visible_cases
     hidden_cases = config.java_hidden_cases
 
-    harness_source = f"""
+    if eval_mode == "double_binary":
+        harness_source = f"""
 public class JavaEvaluatorHarness {{
     private static int runCases(String className, String methodName, boolean mustBeStatic, double[][] cases, double[] expected) throws Exception {{
         Class<?> cls = Class.forName(className);
@@ -459,6 +461,63 @@ public class JavaEvaluatorHarness {{
     }}
 }}
 """
+        visible_main_args = [class_name, expected_method, expected_static, "visible"]
+        hidden_main_args = [class_name, expected_method, expected_static, "hidden"]
+    elif eval_mode == "string_unary":
+        # Expected method contract: public static String <method>(String input)
+        visible_cases_lit = ",".join(json.dumps(str(item[0])) for item in visible_cases)
+        visible_expected_lit = ",".join(json.dumps(str(item[1])) for item in visible_cases)
+        hidden_cases_lit = ",".join(json.dumps(str(item[0])) for item in hidden_cases)
+        hidden_expected_lit = ",".join(json.dumps(str(item[1])) for item in hidden_cases)
+        harness_source = f"""
+public class JavaEvaluatorHarness {{
+    private static int runCases(String className, String methodName, boolean mustBeStatic, String[] cases, String[] expected) throws Exception {{
+        Class<?> cls = Class.forName(className);
+        java.lang.reflect.Method method = cls.getDeclaredMethod(methodName, String.class);
+        if (mustBeStatic && !java.lang.reflect.Modifier.isStatic(method.getModifiers())) {{
+            return 0;
+        }}
+        int passed = 0;
+        for (int i = 0; i < cases.length; i++) {{
+            Object raw = method.invoke(null, cases[i]);
+            String actual = raw == null ? "" : raw.toString();
+            if (actual.trim().equals(expected[i].trim())) {{
+                passed++;
+            }}
+        }}
+        return passed;
+    }}
+
+    public static void main(String[] args) {{
+        try {{
+            String className = args[0];
+            String methodName = args[1];
+            boolean mustBeStatic = Boolean.parseBoolean(args[2]);
+            String mode = args[3];
+            String[] cases;
+            String[] expected;
+            if ("visible".equals(mode)) {{
+                cases = new String[] {{{visible_cases_lit}}};
+                expected = new String[] {{{visible_expected_lit}}};
+            }} else {{
+                cases = new String[] {{{hidden_cases_lit}}};
+                expected = new String[] {{{hidden_expected_lit}}};
+            }}
+            int passed = runCases(className, methodName, mustBeStatic, cases, expected);
+            System.out.println("TOTAL=" + cases.length);
+            System.out.println("PASSED=" + passed);
+        }} catch (Throwable t) {{
+            t.printStackTrace();
+            System.out.println("TOTAL=0");
+            System.out.println("PASSED=0");
+        }}
+    }}
+}}
+"""
+        visible_main_args = [class_name, expected_method, expected_static, "visible"]
+        hidden_main_args = [class_name, expected_method, expected_static, "hidden"]
+    else:
+        raise RuntimeError(f"Unsupported Java evaluation mode: {eval_mode}")
 
     with tempfile.TemporaryDirectory(prefix="java_grader_") as temp_dir:
         temp_path = Path(temp_dir)
@@ -483,7 +542,7 @@ public class JavaEvaluatorHarness {{
             return TestSummary(total=7, passed=0, score=0.0, visible_total=4, visible_passed=0, hidden_total=3, hidden_passed=0)
 
         visible_proc = subprocess.run(
-            ["java", "-cp", str(temp_path), "JavaEvaluatorHarness", class_name, expected_method, expected_static, "visible"],
+            ["java", "-cp", str(temp_path), "JavaEvaluatorHarness", *visible_main_args],
             capture_output=True,
             text=True,
             check=False,
@@ -491,7 +550,7 @@ public class JavaEvaluatorHarness {{
             cwd=str(temp_path),
         )
         hidden_proc = subprocess.run(
-            ["java", "-cp", str(temp_path), "JavaEvaluatorHarness", class_name, expected_method, expected_static, "hidden"],
+            ["java", "-cp", str(temp_path), "JavaEvaluatorHarness", *hidden_main_args],
             capture_output=True,
             text=True,
             check=False,

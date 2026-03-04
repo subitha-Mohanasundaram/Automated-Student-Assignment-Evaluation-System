@@ -14,6 +14,11 @@ results/alice_result.txt
 results/batch/
 results/evaluation_report_*.json
 results/attempt_history.jsonl
+results/local_runs/
+tmp_*.py
+tmp_*.java
+tmp_*.txt
+tmp_*.json
 
 # OS/editor
 .DS_Store

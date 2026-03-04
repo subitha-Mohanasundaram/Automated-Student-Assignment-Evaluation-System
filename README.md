@@ -113,6 +113,18 @@ Problem configuration:
 - `problems/<problem-id>/problem.json`
 - Controls rubric weights, Python test packs, and Java test cases/contracts.
 
+Preconfigured Array/String problem packs:
+
+- `left_rotation`
+- `two_sum`
+- `reverse_string`
+- `anagram_check`
+- `longest_common_prefix`
+
+For these packs, Java contract mode is `string_unary`:
+
+- method signature: `public static String solve(String input)`
+
 ### Create a New In-House Problem (Scaffold)
 
 Use scaffold utility to create a new problem template quickly:

@@ -9,11 +9,11 @@ def _get_target(student_module):
     return getattr(student_module, "solve")
 
 
-def test_left_rotation_visible_1(student_module) -> None:
+def test_two_sum_visible_1(student_module) -> None:
     fn = _get_target(student_module)
-    assert fn("1 2 3 4 5|2") == "3 4 5 1 2"
+    assert fn("2 7 11 15|9") == "0 1"
 
 
-def test_left_rotation_visible_2(student_module) -> None:
+def test_two_sum_visible_2(student_module) -> None:
     fn = _get_target(student_module)
-    assert fn("10 20 30|1") == "20 30 10"
+    assert fn("3 2 4|6") == "1 2"
