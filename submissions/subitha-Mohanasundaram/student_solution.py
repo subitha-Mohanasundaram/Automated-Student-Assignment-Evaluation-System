@@ -5,3 +5,4 @@ def add_numbers(a, b):
 # secrets-fixed-rerun
 # rerun secrets check
 # new-run
+# rerun with correct secret names
