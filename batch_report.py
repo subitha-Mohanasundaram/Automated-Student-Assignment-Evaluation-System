@@ -66,9 +66,9 @@ def find_submission_files(submissions_dir: Path) -> list[tuple[str, Path]]:
         code_files = sorted(list(student_dir.rglob("*.py")) + list(student_dir.rglob("*.java")))
         if not code_files:
             continue
-        # Prefer Python first for backward compatibility, else Java.
-        code_files.sort(key=lambda p: (0 if p.suffix.lower() == ".py" else 1, str(p)))
-        pairs.append((student_dir.name, code_files[0]))
+        # Use the most recently modified file as current submission.
+        latest = max(code_files, key=lambda p: p.stat().st_mtime)
+        pairs.append((student_dir.name, latest))
     return pairs
 
 

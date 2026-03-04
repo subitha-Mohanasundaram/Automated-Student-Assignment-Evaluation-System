@@ -25,9 +25,19 @@ jobs:
         shell: bash
         run: |
           ACTOR="${{ github.actor }}"
+          FILE=""
 
-          # Prefer the current actor's submission folder for predictable selection.
-          FILE=$(find "submissions/$ACTOR" -type f \( -name "*.py" -o -name "*.java" \) 2>/dev/null | head -n1 || true)
+          # On push events, prefer the actual file changed in this commit.
+          if [ "${{ github.event_name }}" = "push" ]; then
+            FILE=$(git diff-tree --no-commit-id --name-only -r "${{ github.sha }}" | grep '^submissions/.*\.\(py\|java\)$' | head -n1 || true)
+          fi
+
+          # Fallback: actor-specific submissions folder.
+          if [ -z "$FILE" ]; then
+            FILE=$(find "submissions/$ACTOR" -type f \( -name "*.py" -o -name "*.java" \) 2>/dev/null | head -n1 || true)
+          fi
+
+          # Final fallback: any submission file in repo.
           if [ -z "$FILE" ]; then
             FILE=$(find submissions -type f \( -name "*.py" -o -name "*.java" \) | head -n1 || true)
           fi
