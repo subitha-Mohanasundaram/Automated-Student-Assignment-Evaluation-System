@@ -52,7 +52,11 @@ jobs:
             --cpus="1.0" \
             --memory="512m" \
             --pids-limit=128 \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --cap-drop ALL \
             --security-opt no-new-privileges \
+            --user "$(id -u):$(id -g)" \
             -v "${PWD}:/workspace" \
             -w /workspace \
             assignment-grader:latest \

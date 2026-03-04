@@ -12,6 +12,7 @@ cheatsub.py
 results/alice_result.txt
 results/batch/
 results/evaluation_report_*.json
+results/attempt_history.jsonl
 
 # OS/editor
 .DS_Store

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
 import re
 import shutil
 import subprocess
@@ -11,6 +12,7 @@ import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -25,25 +27,76 @@ class TestSummary:
     hidden_passed: int = 0
     anti_cheat_passed: bool = True
     anti_cheat_violations: list[str] | None = None
+    plagiarism_detected: bool = False
+    plagiarism_matches: list[str] | None = None
+
+
+@dataclass
+class ProblemConfig:
+    problem_id: str
+    default_language: str
+    scoring: dict[str, float]
+    python_visible_test: str
+    python_hidden_test: str
+    java_contract: dict[str, str]
+    java_visible_cases: list[list[float]]
+    java_hidden_cases: list[list[float]]
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Evaluate a student Python submission using pytest.")
-    parser.add_argument("student_file", help="Path to the student's Python file")
-    parser.add_argument("--student-name", dest="student_name", help="Student name (default: filename)")
+    parser = argparse.ArgumentParser(description="Evaluate a student submission using predefined test packs.")
+    parser.add_argument("student_file", help="Path to the student's code file (.py or .java)")
+    parser.add_argument("--student-name", dest="student_name", help="Student name (default: inferred username/filename)")
     parser.add_argument("--result-file", default="result.txt", help="Output result file path")
+    parser.add_argument("--problem-id", default=None, help="Problem id (default: inferred from path or add_numbers)")
     return parser.parse_args()
-
-
-def _get_test_files() -> tuple[Path, Path]:
-    tests_dir = Path(__file__).parent / "tests"
-    visible = tests_dir / "test_student_submission.py"
-    hidden = tests_dir / "test_student_submission_hidden.py"
-    return visible, hidden
 
 
 def _is_supported_submission(student_file: Path) -> bool:
     return student_file.suffix.lower() in {".py", ".java"}
+
+
+def _get_repo_root() -> Path:
+    return Path(__file__).parent
+
+
+def _infer_problem_id(student_file: Path) -> str:
+    parts = list(student_file.parts)
+    if "submissions" in parts:
+        idx = parts.index("submissions")
+        if idx + 2 < len(parts):
+            # submissions/<username>/<problem_id>/file.ext
+            possible = parts[idx + 2]
+            if "." not in possible:
+                return possible
+    return "add_numbers"
+
+
+def _infer_username(student_file: Path) -> str:
+    parts = list(student_file.parts)
+    if "submissions" in parts:
+        idx = parts.index("submissions")
+        if idx + 1 < len(parts):
+            return parts[idx + 1]
+    return student_file.stem
+
+
+def _load_problem_config(problem_id: str) -> ProblemConfig:
+    config_path = _get_repo_root() / "problems" / problem_id / "problem.json"
+    if not config_path.exists():
+        raise RuntimeError(f"Problem config not found: {config_path}")
+
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    return ProblemConfig(
+        problem_id=raw["problem_id"],
+        default_language=raw.get("default_language", "python"),
+        scoring=raw.get("scoring", {"visible_weight": 0.6, "hidden_weight": 0.4}),
+        python_visible_test=raw["python"]["visible_test"],
+        python_hidden_test=raw["python"]["hidden_test"],
+        java_contract=raw["java"]["contract"],
+        java_visible_cases=raw["java"]["visible_cases"],
+        java_hidden_cases=raw["java"]["hidden_cases"],
+    )
 
 
 def _parse_junit_xml(junit_xml_path: Path) -> TestSummary:
@@ -70,22 +123,52 @@ def _parse_junit_xml(junit_xml_path: Path) -> TestSummary:
     return TestSummary(total=total, passed=passed, score=score)
 
 
-def _write_result(result_file: Path, student_name: str, summary: TestSummary) -> None:
+def _weighted_score(
+    visible_passed: int,
+    visible_total: int,
+    hidden_passed: int,
+    hidden_total: int,
+    scoring: dict[str, float],
+) -> float:
+    visible_weight = float(scoring.get("visible_weight", 0.6))
+    hidden_weight = float(scoring.get("hidden_weight", 0.4))
+    visible_ratio = (visible_passed / visible_total) if visible_total else 0.0
+    hidden_ratio = (hidden_passed / hidden_total) if hidden_total else 0.0
+    return round((visible_ratio * visible_weight + hidden_ratio * hidden_weight) * 100, 2)
+
+
+def _write_result(
+    result_file: Path,
+    student_name: str,
+    problem_id: str,
+    language: str,
+    summary: TestSummary,
+) -> None:
     result_file.parent.mkdir(parents=True, exist_ok=True)
     violations = summary.anti_cheat_violations or []
     anti_cheat_status = "PASS" if summary.anti_cheat_passed else "FAIL"
+    plagiarism_status = "DETECTED" if summary.plagiarism_detected else "NOT_DETECTED"
+    matches = summary.plagiarism_matches or []
+
     content = (
         f"Student Name: {student_name}\n"
+        f"Problem ID: {problem_id}\n"
+        f"Language: {language}\n"
         f"Total Test Cases: {summary.total}\n"
         f"Passed Cases: {summary.passed}\n"
         f"Visible Passed: {summary.visible_passed}/{summary.visible_total}\n"
         f"Hidden Passed: {summary.hidden_passed}/{summary.hidden_total}\n"
         f"Anti-Cheat: {anti_cheat_status}\n"
+        f"Plagiarism: {plagiarism_status}\n"
         f"Score: {summary.score}\n"
     )
     if violations:
         content += "Anti-Cheat Violations:\n"
         for item in violations:
+            content += f"- {item}\n"
+    if matches:
+        content += "Plagiarism Matches:\n"
+        for item in matches:
             content += f"- {item}\n"
     result_file.write_text(content, encoding="utf-8")
 
@@ -110,15 +193,8 @@ def _run_python_anti_cheat(student_file: Path) -> list[str]:
     disallowed_calls = {"eval", "exec", "compile", "__import__"}
     violations: list[str] = []
 
-    try:
-        source = student_file.read_text(encoding="utf-8")
-    except OSError as exc:
-        return [f"Unable to read student file: {exc}"]
-
-    try:
-        tree = ast.parse(source, filename=str(student_file))
-    except SyntaxError as exc:
-        return [f"Syntax error in submission: {exc}"]
+    source = student_file.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(student_file))
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -135,7 +211,6 @@ def _run_python_anti_cheat(student_file: Path) -> list[str]:
             if isinstance(node.func, ast.Name) and node.func.id in disallowed_calls:
                 violations.append(f"Disallowed function call: {node.func.id}(...)")
 
-    # Keep messages unique while preserving order.
     seen: set[str] = set()
     unique_violations: list[str] = []
     for item in violations:
@@ -153,16 +228,95 @@ def _run_java_anti_cheat(student_file: Path) -> list[str]:
         r"\bjava\.net\b",
         r"\bjava\.nio\.file\b",
     ]
-    try:
-        source = student_file.read_text(encoding="utf-8")
-    except OSError as exc:
-        return [f"Unable to read student file: {exc}"]
-
+    source = student_file.read_text(encoding="utf-8")
     violations: list[str] = []
     for pattern in disallowed_patterns:
         if re.search(pattern, source):
             violations.append(f"Disallowed Java usage matched pattern: {pattern}")
     return violations
+
+
+def _normalize_source_for_fingerprint(source: str, language: str) -> str:
+    if language == "python":
+        source = re.sub(r"#.*", "", source)
+    elif language == "java":
+        source = re.sub(r"//.*", "", source)
+        source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
+    source = re.sub(r"\s+", "", source)
+    return source.lower()
+
+
+def _compute_fingerprint(student_file: Path, language: str) -> str:
+    source = student_file.read_text(encoding="utf-8")
+    normalized = _normalize_source_for_fingerprint(source, language)
+    import hashlib
+
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _detect_plagiarism(
+    repo_root: Path,
+    student_file: Path,
+    language: str,
+    problem_id: str,
+    current_username: str,
+    current_fingerprint: str,
+) -> tuple[bool, list[str]]:
+    matches: list[str] = []
+    submissions_dir = repo_root / "submissions"
+    if not submissions_dir.exists():
+        return False, matches
+
+    for file in submissions_dir.rglob(f"*{student_file.suffix.lower()}"):
+        if file.resolve() == student_file.resolve():
+            continue
+        username = _infer_username(file)
+        if username == current_username:
+            continue
+
+        file_problem_id = _infer_problem_id(file)
+        if file_problem_id != problem_id:
+            continue
+
+        try:
+            other_fp = _compute_fingerprint(file, language)
+        except OSError:
+            continue
+        if other_fp == current_fingerprint:
+            matches.append(f"{username}: {file.relative_to(repo_root)}")
+
+    return (len(matches) > 0), matches
+
+
+def _append_attempt_history(
+    repo_root: Path,
+    *,
+    username: str,
+    student_name: str,
+    problem_id: str,
+    language: str,
+    submission_file: Path,
+    summary: TestSummary,
+    fingerprint: str,
+) -> None:
+    history_path = repo_root / "results" / "attempt_history.jsonl"
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "username": username,
+        "student_name": student_name,
+        "problem_id": problem_id,
+        "language": language,
+        "submission_file": str(submission_file.relative_to(repo_root)),
+        "score": summary.score,
+        "passed_cases": summary.passed,
+        "total_cases": summary.total,
+        "anti_cheat_passed": summary.anti_cheat_passed,
+        "plagiarism_detected": summary.plagiarism_detected,
+        "fingerprint": fingerprint,
+    }
+    with history_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record) + "\n")
 
 
 def _extract_java_public_class_name(source: str) -> str:
@@ -178,23 +332,26 @@ def _parse_java_harness_output(output: str) -> tuple[int, int]:
     return int(total_match.group(1)), int(passed_match.group(1))
 
 
-def _evaluate_java(student_file: Path) -> TestSummary:
+def _evaluate_java(student_file: Path, config: ProblemConfig) -> TestSummary:
     if shutil.which("javac") is None or shutil.which("java") is None:
         raise RuntimeError("Java runtime tools not found (javac/java).")
 
-    # Visible and hidden test data for Java submissions. Expected method:
-    # public static double addNumbers(double a, double b)
-    visible_cases = [(2.0, 3.0, 5.0), (-2.0, -7.0, -9.0), (-2.0, 10.0, 8.0), (0.0, 99.0, 99.0)]
-    hidden_cases = [(10_000_000.0, 23_000_000.0, 33_000_000.0), (0.1, 0.2, 0.3), (-2.5, 1.5, -1.0)]
-
     source = student_file.read_text(encoding="utf-8")
     class_name = _extract_java_public_class_name(source)
+    expected_method = config.java_contract.get("method_name", "addNumbers")
+    expected_static = "true" if config.java_contract.get("static", True) else "false"
+
+    visible_cases = config.java_visible_cases
+    hidden_cases = config.java_hidden_cases
 
     harness_source = f"""
 public class JavaEvaluatorHarness {{
-    private static int runCases(String className, double[][] cases, double[] expected) throws Exception {{
+    private static int runCases(String className, String methodName, boolean mustBeStatic, double[][] cases, double[] expected) throws Exception {{
         Class<?> cls = Class.forName(className);
-        java.lang.reflect.Method method = cls.getDeclaredMethod("addNumbers", double.class, double.class);
+        java.lang.reflect.Method method = cls.getDeclaredMethod(methodName, double.class, double.class);
+        if (mustBeStatic && !java.lang.reflect.Modifier.isStatic(method.getModifiers())) {{
+            return 0;
+        }}
         int passed = 0;
         for (int i = 0; i < cases.length; i++) {{
             Object raw = method.invoke(null, cases[i][0], cases[i][1]);
@@ -212,7 +369,9 @@ public class JavaEvaluatorHarness {{
     public static void main(String[] args) {{
         try {{
             String className = args[0];
-            String mode = args[1];
+            String methodName = args[1];
+            boolean mustBeStatic = Boolean.parseBoolean(args[2]);
+            String mode = args[3];
             double[][] cases;
             double[] expected;
             if ("visible".equals(mode)) {{
@@ -222,7 +381,7 @@ public class JavaEvaluatorHarness {{
                 cases = new double[][] {{{",".join(f"{{{a},{b}}}" for a, b, _ in hidden_cases)}}};
                 expected = new double[] {{{",".join(str(c) for _, _, c in hidden_cases)}}};
             }}
-            int passed = runCases(className, cases, expected);
+            int passed = runCases(className, methodName, mustBeStatic, cases, expected);
             System.out.println("TOTAL=" + cases.length);
             System.out.println("PASSED=" + passed);
         }} catch (Throwable t) {{
@@ -257,7 +416,7 @@ public class JavaEvaluatorHarness {{
             return TestSummary(total=7, passed=0, score=0.0, visible_total=4, visible_passed=0, hidden_total=3, hidden_passed=0)
 
         visible_proc = subprocess.run(
-            ["java", "-cp", str(temp_path), "JavaEvaluatorHarness", class_name, "visible"],
+            ["java", "-cp", str(temp_path), "JavaEvaluatorHarness", class_name, expected_method, expected_static, "visible"],
             capture_output=True,
             text=True,
             check=False,
@@ -265,7 +424,7 @@ public class JavaEvaluatorHarness {{
             cwd=str(temp_path),
         )
         hidden_proc = subprocess.run(
-            ["java", "-cp", str(temp_path), "JavaEvaluatorHarness", class_name, "hidden"],
+            ["java", "-cp", str(temp_path), "JavaEvaluatorHarness", class_name, expected_method, expected_static, "hidden"],
             capture_output=True,
             text=True,
             check=False,
@@ -287,7 +446,7 @@ public class JavaEvaluatorHarness {{
 
     total = visible_total + hidden_total
     passed = visible_passed + hidden_passed
-    score = round((passed / total) * 100, 2) if total else 0.0
+    score = _weighted_score(visible_passed, visible_total, hidden_passed, hidden_total, config.scoring)
     return TestSummary(
         total=total,
         passed=passed,
@@ -299,8 +458,10 @@ public class JavaEvaluatorHarness {{
     )
 
 
-def _evaluate_python(student_file: Path) -> TestSummary:
-    visible_test_file, hidden_test_file = _get_test_files()
+def _evaluate_python(student_file: Path, config: ProblemConfig) -> TestSummary:
+    repo_root = _get_repo_root()
+    visible_test_file = repo_root / config.python_visible_test
+    hidden_test_file = repo_root / config.python_hidden_test
     if not visible_test_file.exists():
         raise RuntimeError(f"Visible test file not found: {visible_test_file}")
     if not hidden_test_file.exists():
@@ -310,13 +471,8 @@ def _evaluate_python(student_file: Path) -> TestSummary:
         visible_xml_path = Path(temp_dir) / "visible_result.xml"
         hidden_xml_path = Path(temp_dir) / "hidden_result.xml"
 
-        try:
-            visible_process = _run_pytest(student_file, visible_test_file, visible_xml_path)
-            hidden_process = _run_pytest(student_file, hidden_test_file, hidden_xml_path)
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError("Test execution timed out.") from exc
-        except OSError as exc:
-            raise RuntimeError(f"Failed to execute pytest: {exc}") from exc
+        visible_process = _run_pytest(student_file, visible_test_file, visible_xml_path)
+        hidden_process = _run_pytest(student_file, hidden_test_file, hidden_xml_path)
 
         if visible_process.stdout:
             print(visible_process.stdout.strip())
@@ -335,11 +491,17 @@ def _evaluate_python(student_file: Path) -> TestSummary:
 
     combined_total = visible_summary.total + hidden_summary.total
     combined_passed = visible_summary.passed + hidden_summary.passed
-    combined_score = round((combined_passed / combined_total) * 100, 2) if combined_total > 0 else 0.0
+    score = _weighted_score(
+        visible_summary.passed,
+        visible_summary.total,
+        hidden_summary.passed,
+        hidden_summary.total,
+        config.scoring,
+    )
     return TestSummary(
         total=combined_total,
         passed=combined_passed,
-        score=combined_score,
+        score=score,
         visible_total=visible_summary.total,
         visible_passed=visible_summary.passed,
         hidden_total=hidden_summary.total,
@@ -347,14 +509,40 @@ def _evaluate_python(student_file: Path) -> TestSummary:
     )
 
 
-def evaluate_student(student_file: Path, student_name: str, result_file: Path) -> int:
-    if student_file.suffix.lower() == ".py":
-        violations = _run_python_anti_cheat(student_file)
-    elif student_file.suffix.lower() == ".java":
-        violations = _run_java_anti_cheat(student_file)
-    else:
-        print("Error: unsupported submission format")
+def evaluate_student(
+    student_file: Path,
+    student_name: str,
+    result_file: Path,
+    problem_id: str,
+) -> int:
+    repo_root = _get_repo_root()
+    language = "python" if student_file.suffix.lower() == ".py" else "java"
+    username = _infer_username(student_file)
+
+    try:
+        config = _load_problem_config(problem_id)
+    except RuntimeError as exc:
+        print(f"Error: {exc}")
         return 1
+
+    try:
+        if language == "python":
+            violations = _run_python_anti_cheat(student_file)
+        else:
+            violations = _run_java_anti_cheat(student_file)
+    except (OSError, SyntaxError) as exc:
+        print(f"Error: anti-cheat failed: {exc}")
+        return 1
+
+    fingerprint = _compute_fingerprint(student_file, language)
+    plagiarism_detected, plagiarism_matches = _detect_plagiarism(
+        repo_root=repo_root,
+        student_file=student_file,
+        language=language,
+        problem_id=problem_id,
+        current_username=username,
+        current_fingerprint=fingerprint,
+    )
 
     if violations:
         summary = TestSummary(
@@ -367,25 +555,51 @@ def evaluate_student(student_file: Path, student_name: str, result_file: Path) -
             hidden_passed=0,
             anti_cheat_passed=False,
             anti_cheat_violations=violations,
+            plagiarism_detected=plagiarism_detected,
+            plagiarism_matches=plagiarism_matches,
         )
-        _write_result(result_file=result_file, student_name=student_name, summary=summary)
+        _write_result(result_file=result_file, student_name=student_name, problem_id=problem_id, language=language, summary=summary)
+        _append_attempt_history(
+            repo_root,
+            username=username,
+            student_name=student_name,
+            problem_id=problem_id,
+            language=language,
+            submission_file=student_file,
+            summary=summary,
+            fingerprint=fingerprint,
+        )
         print("Anti-cheat checks failed. Submission disqualified.")
         print(f"Result saved to: {result_file}")
         return 0
 
     try:
-        if student_file.suffix.lower() == ".py":
-            summary = _evaluate_python(student_file)
+        if language == "python":
+            summary = _evaluate_python(student_file, config)
         else:
-            summary = _evaluate_java(student_file)
+            summary = _evaluate_java(student_file, config)
     except (RuntimeError, ET.ParseError, ValueError, subprocess.TimeoutExpired) as exc:
         print(f"Error: {exc}")
         return 1
 
     summary.anti_cheat_passed = True
     summary.anti_cheat_violations = []
+    summary.plagiarism_detected = plagiarism_detected
+    summary.plagiarism_matches = plagiarism_matches
+    if plagiarism_detected:
+        summary.score = max(round(summary.score * 0.7, 2), 0.0)
 
-    _write_result(result_file=result_file, student_name=student_name, summary=summary)
+    _write_result(result_file=result_file, student_name=student_name, problem_id=problem_id, language=language, summary=summary)
+    _append_attempt_history(
+        repo_root,
+        username=username,
+        student_name=student_name,
+        problem_id=problem_id,
+        language=language,
+        submission_file=student_file,
+        summary=summary,
+        fingerprint=fingerprint,
+    )
     print(f"Result saved to: {result_file}")
     return 0
 
@@ -398,10 +612,11 @@ def main() -> int:
         print("Error: student_file must be an existing .py or .java file")
         return 1
 
-    student_name = args.student_name.strip() if args.student_name else student_file.stem
+    student_name = args.student_name.strip() if args.student_name else _infer_username(student_file)
     result_file = Path(args.result_file).resolve()
+    problem_id = args.problem_id.strip() if args.problem_id else _infer_problem_id(student_file)
 
-    return evaluate_student(student_file=student_file, student_name=student_name, result_file=result_file)
+    return evaluate_student(student_file=student_file, student_name=student_name, result_file=result_file, problem_id=problem_id)
 
 
 if __name__ == "__main__":

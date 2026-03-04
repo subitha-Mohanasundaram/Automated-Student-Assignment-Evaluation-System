@@ -93,6 +93,8 @@ Students can push Python or Java files in:
 ```text
 submissions/<github-username>/student_solution.py
 submissions/<github-username>/student_solution.java
+submissions/<github-username>/<problem-id>/student_solution.py
+submissions/<github-username>/<problem-id>/student_solution.java
 ```
 
 Java submission contract (current version):
@@ -100,6 +102,11 @@ Java submission contract (current version):
 - Must define a public class with a static method:
   `addNumbers(double a, double b)`
 - Evaluator compiles with `javac` and runs visible + hidden Java test cases.
+
+Problem configuration:
+
+- `problems/<problem-id>/problem.json`
+- Controls rubric weights, Python test packs, and Java test cases/contracts.
 
 ### How to test end-to-end
 
@@ -124,6 +131,9 @@ Evaluation now runs inside Docker in GitHub Actions with:
 - CPU limit (`--cpus=1.0`)
 - memory limit (`--memory=512m`)
 - PID limit (`--pids-limit=128`)
+- read-only root filesystem (`--read-only`)
+- tmpfs scratch space (`--tmpfs /tmp`)
+- Linux capability drop (`--cap-drop ALL`)
 - no new privileges (`--security-opt no-new-privileges`)
 
 This reduces risk from untrusted student code and is suitable for interview-style coding assessment automation.
@@ -145,7 +155,7 @@ python batch_report.py --submissions-dir submissions --students-file students.cs
 GitHub workflow:
 
 - `.github/workflows/batch_dashboard.yml`
-- Trigger: `workflow_dispatch` or push to `submissions/**.py` / `students.csv`
+- Trigger: `workflow_dispatch` or push to `submissions/**.py` / `submissions/**.java` / `students.csv`
 - Runs inside Docker sandbox and uploads batch artifacts
 
 ## Real-Time Run And Check Commands

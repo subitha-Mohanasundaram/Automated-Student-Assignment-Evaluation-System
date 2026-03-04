@@ -16,13 +16,19 @@ class BatchRow:
     github_username: str
     student_name: str
     email: str
+    problem_id: str
+    language: str
     submission_file: str
     anti_cheat: str
+    plagiarism: str
     total_test_cases: int
     passed_cases: int
     visible_passed: str
     hidden_passed: str
     score: float
+    attempts: int
+    plagiarism_hits: int
+    last_attempt_utc: str
 
 
 def parse_args() -> argparse.Namespace:
@@ -30,6 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--submissions-dir", default="submissions", help="Directory with student submissions")
     parser.add_argument("--students-file", default="students.csv", help="Student mapping CSV path")
     parser.add_argument("--output-dir", default="results/batch", help="Output directory for batch reports")
+    parser.add_argument("--attempt-history", default="results/attempt_history.jsonl", help="Path to attempt history jsonl")
     return parser.parse_args()
 
 
@@ -75,6 +82,42 @@ def parse_result_file(result_file: Path) -> dict[str, str]:
     return parsed
 
 
+def load_attempt_history(history_file: Path) -> dict[str, dict[str, str | int]]:
+    stats: dict[str, dict[str, str | int]] = {}
+    if not history_file.exists():
+        return stats
+
+    for line in history_file.read_text(encoding="utf-8").splitlines():
+        raw = line.strip()
+        if not raw:
+            continue
+        try:
+            rec = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+
+        username = str(rec.get("username", "")).strip()
+        if not username:
+            continue
+
+        entry = stats.setdefault(
+            username,
+            {
+                "attempts": 0,
+                "plagiarism_hits": 0,
+                "last_attempt_utc": "",
+            },
+        )
+        entry["attempts"] = int(entry["attempts"]) + 1
+        if bool(rec.get("plagiarism_detected", False)):
+            entry["plagiarism_hits"] = int(entry["plagiarism_hits"]) + 1
+        ts = str(rec.get("timestamp_utc", ""))
+        if ts and ts > str(entry["last_attempt_utc"]):
+            entry["last_attempt_utc"] = ts
+
+    return stats
+
+
 def run_single_evaluation(submission_file: Path, student_name: str, result_file: Path) -> None:
     cmd = [
         sys.executable,
@@ -115,20 +158,25 @@ def write_dashboard_markdown(rows: list[BatchRow], md_path: Path) -> None:
     passed = sum(1 for row in rows if row.score >= 80.0 and row.anti_cheat == "PASS")
     avg = round(sum(row.score for row in rows) / total, 2) if total else 0.0
 
+    plagiarism_total = sum(1 for row in rows if row.plagiarism == "DETECTED")
+    anti_cheat_failures = sum(1 for row in rows if row.anti_cheat != "PASS")
+
     lines = [
         "# Batch Evaluation Dashboard",
         "",
         f"- Total submissions: {total}",
         f"- Passed threshold (>=80 and anti-cheat PASS): {passed}",
         f"- Average score: {avg}",
+        f"- Anti-cheat failures: {anti_cheat_failures}",
+        f"- Plagiarism detected: {plagiarism_total}",
         "",
-        "| GitHub Username | Student Name | Anti-Cheat | Passed Cases | Score |",
-        "|---|---|---|---:|---:|",
+        "| GitHub Username | Problem | Lang | Anti-Cheat | Plagiarism | Attempts | Passed Cases | Score |",
+        "|---|---|---|---|---|---:|---:|---:|",
     ]
     for row in rows:
         lines.append(
-            f"| {row.github_username} | {row.student_name} | {row.anti_cheat} | "
-            f"{row.passed_cases}/{row.total_test_cases} | {row.score} |"
+            f"| {row.github_username} | {row.problem_id} | {row.language} | {row.anti_cheat} | "
+            f"{row.plagiarism} | {row.attempts} | {row.passed_cases}/{row.total_test_cases} | {row.score} |"
         )
 
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -139,9 +187,11 @@ def main() -> int:
     submissions_dir = Path(args.submissions_dir).resolve()
     students_file = Path(args.students_file).resolve()
     output_dir = Path(args.output_dir).resolve()
+    history_file = Path(args.attempt_history).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     students_map = load_students_map(students_file)
+    history_stats = load_attempt_history(history_file)
     submissions = find_submission_files(submissions_dir)
     if not submissions:
         print("No submissions found for batch reporting.")
@@ -153,18 +203,25 @@ def main() -> int:
         result_file = output_dir / f"{username}_result.txt"
         run_single_evaluation(submission_file=submission_file, student_name=mapped_name, result_file=result_file)
         parsed = parse_result_file(result_file)
+        stats = history_stats.get(username, {"attempts": 0, "plagiarism_hits": 0, "last_attempt_utc": ""})
 
         row = BatchRow(
             github_username=username,
             student_name=parsed.get("Student Name", mapped_name),
             email=mapped_email,
+            problem_id=parsed.get("Problem ID", "add_numbers"),
+            language=parsed.get("Language", submission_file.suffix.lower().lstrip(".")),
             submission_file=str(submission_file.relative_to(Path.cwd())),
             anti_cheat=parsed.get("Anti-Cheat", "UNKNOWN"),
+            plagiarism=parsed.get("Plagiarism", "NOT_DETECTED"),
             total_test_cases=int(parsed.get("Total Test Cases", "0")),
             passed_cases=int(parsed.get("Passed Cases", "0")),
             visible_passed=parsed.get("Visible Passed", "0/0"),
             hidden_passed=parsed.get("Hidden Passed", "0/0"),
             score=float(parsed.get("Score", "0")),
+            attempts=int(stats["attempts"]),
+            plagiarism_hits=int(stats["plagiarism_hits"]),
+            last_attempt_utc=str(stats["last_attempt_utc"]),
         )
         rows.append(row)
 
