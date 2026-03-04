@@ -3,5 +3,3 @@ public class student_solution {
         return a + b;
     }
 }
-# rerun after java package fix
-# rerun after java package fix
