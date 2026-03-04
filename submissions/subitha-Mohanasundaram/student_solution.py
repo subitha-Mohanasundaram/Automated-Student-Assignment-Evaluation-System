@@ -8,3 +8,4 @@ def add_numbers(a, b):
 # rerun with correct secret names
 # trigger docker step
 # rerun after hidden test file fix
+# final realtime check
