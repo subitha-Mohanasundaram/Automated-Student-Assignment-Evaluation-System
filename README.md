@@ -108,6 +108,22 @@ Problem configuration:
 - `problems/<problem-id>/problem.json`
 - Controls rubric weights, Python test packs, and Java test cases/contracts.
 
+### Create a New In-House Problem (Scaffold)
+
+Use scaffold utility to create a new problem template quickly:
+
+```bash
+python problem_scaffold.py swap_numbers --python-function solve --java-method solve
+```
+
+Generated files:
+
+- `problems/swap_numbers/problem.json`
+- `tests/problems/swap_numbers/test_visible.py`
+- `tests/problems/swap_numbers/test_hidden.py`
+
+Then edit the generated test cases and rubric JSON to match your problem statement.
+
 ### How to test end-to-end
 
 1. Add your GitHub username/email in `students.csv`.

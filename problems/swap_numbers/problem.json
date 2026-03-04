@@ -1,0 +1,43 @@
+{
+  "problem_id": "swap_numbers",
+  "default_language": "python",
+  "scoring": {
+    "visible_weight": 0.6,
+    "hidden_weight": 0.4
+  },
+  "python": {
+    "visible_test": "tests/problems/swap_numbers/test_visible.py",
+    "hidden_test": "tests/problems/swap_numbers/test_hidden.py"
+  },
+  "java": {
+    "contract": {
+      "class_name_hint": "student_solution",
+      "method_name": "solve",
+      "static": true
+    },
+    "visible_cases": [
+      [
+        1.0,
+        2.0,
+        3.0
+      ],
+      [
+        5.0,
+        5.0,
+        10.0
+      ]
+    ],
+    "hidden_cases": [
+      [
+        10.0,
+        -4.0,
+        6.0
+      ],
+      [
+        0.5,
+        0.5,
+        1.0
+      ]
+    ]
+  }
+}
