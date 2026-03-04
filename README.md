@@ -65,6 +65,7 @@ This project now supports an automated flow:
 - `students.csv`: maps GitHub username to student name and email
 - `.github/workflows/evaluate.yml`: evaluates submission and uploads artifact
 - `.github/workflows/send_result_email.yml`: downloads artifact and emails result
+- `Dockerfile.grader`: sandbox runtime image for safe evaluation
 
 ### Configure student mapping
 
@@ -107,3 +108,15 @@ If email workflow fails, open the failed job logs and check:
 - student username not found in `students.csv`
 - missing SMTP secrets
 - invalid SMTP credentials/app password
+
+## Sandbox Execution (Docker)
+
+Evaluation now runs inside Docker in GitHub Actions with:
+
+- no network (`--network none`)
+- CPU limit (`--cpus=1.0`)
+- memory limit (`--memory=512m`)
+- PID limit (`--pids-limit=128`)
+- no new privileges (`--security-opt no-new-privileges`)
+
+This reduces risk from untrusted student code and is suitable for interview-style coding assessment automation.
