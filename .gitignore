@@ -1,0 +1,18 @@
+.venv/
+.pytest_cache/
+__pycache__/
+tests/__pycache__/
+submissions/**/__pycache__/
+*.pyc
+
+# Local evaluation outputs
+result.txt
+cheat_result.txt
+cheatsub.py
+results/alice_result.txt
+results/batch/
+results/evaluation_report_*.json
+
+# OS/editor
+.DS_Store
+Thumbs.db

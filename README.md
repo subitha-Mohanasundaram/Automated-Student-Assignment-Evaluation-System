@@ -140,3 +140,21 @@ GitHub workflow:
 - `.github/workflows/batch_dashboard.yml`
 - Trigger: `workflow_dispatch` or push to `submissions/**.py` / `students.csv`
 - Runs inside Docker sandbox and uploads batch artifacts
+
+## Real-Time Run And Check Commands
+
+Use these commands from Command Prompt to trigger a real-time submission evaluation:
+
+```bat
+cd /d C:\Automation
+echo # realtime-test>> submissions\subitha-Mohanasundaram\student_solution.py
+git add submissions\subitha-Mohanasundaram\student_solution.py
+git commit -m "Realtime submission test"
+git push
+```
+
+After push, check in GitHub:
+
+1. `Actions -> Evaluate Submission` should be green.
+2. `Actions -> Send Result Email` should be green.
+3. Recipient mailbox should get `Assignment Evaluation Result` with score details and `result.txt`.
