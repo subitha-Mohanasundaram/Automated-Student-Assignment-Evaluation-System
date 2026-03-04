@@ -202,3 +202,24 @@ After push, check in GitHub:
 1. `Actions -> Evaluate Submission` should be green.
 2. `Actions -> Send Result Email` should be green.
 3. Recipient mailbox should get `Assignment Evaluation Result` with score details and `result.txt`.
+
+## Self-Hosted Local Runner (Lower-Cost Mode)
+
+Use local runner when you want to evaluate submissions without GitHub Actions usage:
+
+```bash
+python self_hosted_runner.py submissions/<github-username>/student_solution.py
+python self_hosted_runner.py submissions/<github-username>/student_solution.java
+```
+
+Optional email send in local mode:
+
+```bash
+python self_hosted_runner.py submissions/<github-username>/student_solution.java --send-email
+```
+
+Local outputs are stored under:
+
+- `results/local_runs/<username>_<timestamp>/result.txt`
+- `results/local_runs/<username>_<timestamp>/result.json`
+- `results/local_runs/<username>_<timestamp>/summary.md`
