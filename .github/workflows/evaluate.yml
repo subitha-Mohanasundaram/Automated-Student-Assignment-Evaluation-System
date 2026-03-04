@@ -29,7 +29,7 @@ jobs:
 
           # On push events, prefer the actual file changed in this commit.
           if [ "${{ github.event_name }}" = "push" ]; then
-            FILE=$(git diff-tree --no-commit-id --name-only -r "${{ github.sha }}" | grep '^submissions/.*\.\(py\|java\)$' | head -n1 || true)
+            FILE=$(git show --name-only --pretty="" "${{ github.sha }}" | grep '^submissions/.*\.\(py\|java\)$' | head -n1 || true)
           fi
 
           # Fallback: actor-specific submissions folder.
@@ -49,6 +49,11 @@ jobs:
 
           echo "file=$FILE" >> "$GITHUB_OUTPUT"
           echo "actor=$ACTOR" >> "$GITHUB_OUTPUT"
+          if [[ "$FILE" == *.java ]]; then
+            echo "lang=java" >> "$GITHUB_OUTPUT"
+          else
+            echo "lang=python" >> "$GITHUB_OUTPUT"
+          fi
           echo "Selected submission file: $FILE"
 
       - name: Build grader sandbox image
@@ -77,12 +82,17 @@ jobs:
         run: |
           mkdir -p artifacts
           echo "${{ steps.submission.outputs.actor }}" > artifacts/actor.txt
+          echo "${{ steps.submission.outputs.file }}" > artifacts/file.txt
+          echo "${{ steps.submission.outputs.lang }}" > artifacts/lang.txt
           cp result.txt artifacts/result.txt
 
       - name: Publish score summary
         shell: bash
         run: |
           echo "## Evaluation Result" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Selected file: ${{ steps.submission.outputs.file }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Selected language: ${{ steps.submission.outputs.lang }}" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           cat result.txt >> "$GITHUB_STEP_SUMMARY"
 
@@ -93,5 +103,7 @@ jobs:
           path: |
             artifacts/result.txt
             artifacts/actor.txt
+            artifacts/file.txt
+            artifacts/lang.txt
           if-no-files-found: error
           retention-days: 14
