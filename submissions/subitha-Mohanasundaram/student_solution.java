@@ -5,3 +5,4 @@ public class student_solution {
 }
 // force-java-language
 // verify-java-language
+// auto-java-check
