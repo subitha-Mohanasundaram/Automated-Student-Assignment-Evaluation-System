@@ -7,3 +7,4 @@ def add_numbers(a, b):
 # new-run
 # rerun with correct secret names
 # trigger docker step
+# rerun after hidden test file fix
