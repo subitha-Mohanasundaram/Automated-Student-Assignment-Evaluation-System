@@ -6,6 +6,19 @@ on:
       - "submissions/**.py"
       - "submissions/**.java"
   workflow_dispatch:
+    inputs:
+      submission_file:
+        description: "Submission file path (e.g. submissions/user/student_solution.java)"
+        required: false
+        type: string
+      problem_id:
+        description: "Problem id override (optional)"
+        required: false
+        type: string
+      student_name:
+        description: "Student display name override (optional)"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -26,9 +39,24 @@ jobs:
         run: |
           ACTOR="${{ github.actor }}"
           FILE=""
+          USERNAME=""
+          DISPLAY_NAME=""
+          PROBLEM_ID="${{ github.event.inputs.problem_id }}"
+          INPUT_FILE="${{ github.event.inputs.submission_file }}"
+          INPUT_STUDENT_NAME="${{ github.event.inputs.student_name }}"
+
+          # For manual runs, first honor explicitly provided submission file.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "$INPUT_FILE" ]; then
+            if [ -f "$INPUT_FILE" ]; then
+              FILE="$INPUT_FILE"
+            else
+              echo "Provided submission_file does not exist: $INPUT_FILE"
+              exit 1
+            fi
+          fi
 
           # On push events, prefer the actual file changed in this commit.
-          if [ "${{ github.event_name }}" = "push" ]; then
+          if [ -z "$FILE" ] && [ "${{ github.event_name }}" = "push" ]; then
             FILE=$(git show --name-only --pretty="" "${{ github.sha }}" | grep '^submissions/.*\.\(py\|java\)$' | head -n1 || true)
           fi
 
@@ -47,14 +75,38 @@ jobs:
             exit 1
           fi
 
+          USERNAME=$(echo "$FILE" | awk -F/ '{print $2}')
+          if [ -z "$USERNAME" ]; then
+            echo "Unable to infer username from path: $FILE"
+            exit 1
+          fi
+
+          if [ -n "$INPUT_STUDENT_NAME" ]; then
+            DISPLAY_NAME="$INPUT_STUDENT_NAME"
+          else
+            DISPLAY_NAME="$USERNAME"
+          fi
+
+          if [ -z "$PROBLEM_ID" ]; then
+            # submissions/<username>/<problem_id>/file.ext (optional)
+            SEG3=$(echo "$FILE" | awk -F/ '{print $3}')
+            if [ -n "$SEG3" ] && [[ "$SEG3" != *.* ]]; then
+              PROBLEM_ID="$SEG3"
+            fi
+          fi
+
           echo "file=$FILE" >> "$GITHUB_OUTPUT"
-          echo "actor=$ACTOR" >> "$GITHUB_OUTPUT"
+          echo "username=$USERNAME" >> "$GITHUB_OUTPUT"
+          echo "display_name=$DISPLAY_NAME" >> "$GITHUB_OUTPUT"
+          echo "problem_id=$PROBLEM_ID" >> "$GITHUB_OUTPUT"
           if [[ "$FILE" == *.java ]]; then
             echo "lang=java" >> "$GITHUB_OUTPUT"
           else
             echo "lang=python" >> "$GITHUB_OUTPUT"
           fi
           echo "Selected submission file: $FILE"
+          echo "Submission username: $USERNAME"
+          echo "Resolved problem id: ${PROBLEM_ID:-add_numbers}"
 
       - name: Build grader sandbox image
         run: |
@@ -62,6 +114,10 @@ jobs:
 
       - name: Evaluate submission in Docker sandbox
         run: |
+          PROBLEM_ARG=""
+          if [ -n "${{ steps.submission.outputs.problem_id }}" ]; then
+            PROBLEM_ARG="--problem-id ${{ steps.submission.outputs.problem_id }}"
+          fi
           docker run --rm \
             --network none \
             --cpus="1.0" \
@@ -75,13 +131,13 @@ jobs:
             -v "${PWD}:/workspace" \
             -w /workspace \
             assignment-grader:latest \
-            python evaluator.py "${{ steps.submission.outputs.file }}" --student-name "${{ steps.submission.outputs.actor }}" --result-file result.txt
+            sh -lc "python evaluator.py '${{ steps.submission.outputs.file }}' --student-name '${{ steps.submission.outputs.display_name }}' --result-file result.txt $PROBLEM_ARG"
 
       - name: Save metadata artifact
         shell: bash
         run: |
           mkdir -p artifacts
-          echo "${{ steps.submission.outputs.actor }}" > artifacts/actor.txt
+          echo "${{ steps.submission.outputs.username }}" > artifacts/actor.txt
           echo "${{ steps.submission.outputs.file }}" > artifacts/file.txt
           echo "${{ steps.submission.outputs.lang }}" > artifacts/lang.txt
           cp result.txt artifacts/result.txt
@@ -89,10 +145,17 @@ jobs:
       - name: Publish score summary
         shell: bash
         run: |
+          PROBLEM_SUMMARY="${{ steps.submission.outputs.problem_id }}"
+          if [ -z "$PROBLEM_SUMMARY" ]; then
+            PROBLEM_SUMMARY="add_numbers"
+          fi
           echo "## Evaluation Result" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "- Selected file: ${{ steps.submission.outputs.file }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Submission username: ${{ steps.submission.outputs.username }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Display name: ${{ steps.submission.outputs.display_name }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Selected language: ${{ steps.submission.outputs.lang }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Problem ID: $PROBLEM_SUMMARY" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           cat result.txt >> "$GITHUB_STEP_SUMMARY"
 

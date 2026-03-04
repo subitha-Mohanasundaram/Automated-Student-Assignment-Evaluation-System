@@ -134,6 +134,12 @@ Then edit the generated test cases and rubric JSON to match your problem stateme
    - `Send Result Email` should pass.
 5. Confirm email inbox for mapped student email.
 
+Manual run from GitHub UI (`workflow_dispatch`) now supports optional inputs:
+
+- `submission_file` (exact path, e.g. `submissions/user/student_solution.java`)
+- `problem_id` (override)
+- `student_name` (display name override)
+
 If email workflow fails, open the failed job logs and check:
 - student username not found in `students.csv`
 - missing SMTP secrets
