@@ -65,13 +65,16 @@ def build_message(
     result_text = result_file.read_text(encoding="utf-8").strip()
 
     message.set_content(
-        f"Hello {student_name},\n\n"
-        "Your submission has been evaluated successfully.\n\n"
-        "Score details:\n"
+        f"Dear {student_name},\n\n"
+        "This is an automated notification regarding your coding submission evaluation.\n\n"
+        "Evaluation Summary\n"
+        "------------------\n"
         f"{result_text}\n\n"
-        "Please also find the same report attached.\n\n"
-        "Regards,\n"
-        "Automated Evaluation System"
+        "The detailed report is attached to this email for your reference.\n\n"
+        "If you believe there is an issue with this result, please contact the assessment administrator.\n\n"
+        "Best regards,\n"
+        "Assessment Automation Team\n"
+        "(Automated Evaluation System)"
     )
 
     message.add_attachment(
