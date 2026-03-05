@@ -46,21 +46,25 @@ jobs:
         run: |
           ACTOR=$(cat artifacts/actor.txt)
           LINE=$(awk -F, -v u="$ACTOR" '$1==u {print $0}' students.csv)
+
           if [ -z "$LINE" ]; then
-            echo "No student mapping found for GitHub user: $ACTOR"
-            exit 1
+            echo "No mapping for $ACTOR. Using fallback admin email."
+            NAME="$ACTOR"
+            EMAIL="${{ secrets.ADMIN_EMAIL }}"
+          else
+            NAME=$(echo "$LINE" | awk -F, '{print $2}')
+            EMAIL=$(echo "$LINE" | awk -F, '{print $3}')
           fi
 
-          NAME=$(echo "$LINE" | awk -F, '{print $2}')
-          EMAIL=$(echo "$LINE" | awk -F, '{print $3}')
           if [ -z "$EMAIL" ]; then
-            echo "Email is empty for GitHub user: $ACTOR"
+            echo "Email is empty (mapping + fallback missing) for GitHub user: $ACTOR"
             exit 1
           fi
 
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           echo "email=$EMAIL" >> "$GITHUB_OUTPUT"
           echo "actor=$ACTOR" >> "$GITHUB_OUTPUT"
+
 
       - name: Send result email
         env:
