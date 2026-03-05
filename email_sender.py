@@ -63,18 +63,41 @@ def build_message(
     message["From"] = sender_email
     message["To"] = recipient_email
     result_text = result_file.read_text(encoding="utf-8").strip()
+    parsed: dict[str, str] = {}
+    for line in result_text.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        parsed[key.strip()] = value.strip()
+
+    student_label = parsed.get("Student Name", student_name)
+    problem_id = parsed.get("Problem ID", "N/A")
+    language = parsed.get("Language", "N/A")
+    score = parsed.get("Score", "N/A")
+    passed = parsed.get("Passed Cases", "N/A")
+    total = parsed.get("Total Test Cases", "N/A")
+    anti_cheat = parsed.get("Anti-Cheat", "N/A")
+    plagiarism = parsed.get("Plagiarism", "N/A")
+    visible = parsed.get("Visible Passed", "N/A")
+    hidden = parsed.get("Hidden Passed", "N/A")
 
     message.set_content(
-        f"Dear {student_name},\n\n"
-        "This is an automated notification regarding your coding submission evaluation.\n\n"
-        "Evaluation Summary\n"
-        "------------------\n"
-        f"{result_text}\n\n"
-        "The detailed report is attached to this email for your reference.\n\n"
-        "If you believe there is an issue with this result, please contact the assessment administrator.\n\n"
+        f"Dear {student_label},\n\n"
+        "Your coding submission has been evaluated.\n\n"
+        "Key Results\n"
+        "-----------\n"
+        f"Problem: {problem_id}\n"
+        f"Language: {language}\n"
+        f"Score: {score}\n"
+        f"Passed Tests: {passed}/{total}\n"
+        f"Visible Tests: {visible}\n"
+        f"Hidden Tests: {hidden}\n"
+        f"Anti-Cheat Status: {anti_cheat}\n"
+        f"Plagiarism Status: {plagiarism}\n\n"
+        "A detailed report is attached for complete scoring breakdown.\n\n"
+        "If you need a review, reply to the assessment team with your submission details.\n\n"
         "Best regards,\n"
-        "Assessment Automation Team\n"
-        "(Automated Evaluation System)"
+        "Assessment Automation Team"
     )
 
     message.add_attachment(

@@ -29,6 +29,8 @@ class TestSummary:
     anti_cheat_violations: list[str] | None = None
     plagiarism_detected: bool = False
     plagiarism_matches: list[str] | None = None
+    plagiarism_risk_score: float = 0.0
+    plagiarism_evidence: list[str] | None = None
     visible_weight: float = 0.6
     hidden_weight: float = 0.4
     visible_score_percent: float = 0.0
@@ -168,6 +170,7 @@ def _write_result(
     anti_cheat_status = "PASS" if summary.anti_cheat_passed else "FAIL"
     plagiarism_status = "DETECTED" if summary.plagiarism_detected else "NOT_DETECTED"
     matches = summary.plagiarism_matches or []
+    evidence = summary.plagiarism_evidence or []
 
     content = (
         f"Student Name: {student_name}\n"
@@ -185,6 +188,7 @@ def _write_result(
         f"Weighted Hidden Contribution: {summary.weighted_hidden_contribution}\n"
         f"Anti-Cheat: {anti_cheat_status}\n"
         f"Plagiarism: {plagiarism_status}\n"
+        f"Plagiarism Risk Score: {summary.plagiarism_risk_score}\n"
         f"Score: {summary.score}\n"
     )
     if violations:
@@ -194,6 +198,10 @@ def _write_result(
     if matches:
         content += "Plagiarism Matches:\n"
         for item in matches:
+            content += f"- {item}\n"
+    if evidence:
+        content += "Plagiarism Evidence:\n"
+        for item in evidence:
             content += f"- {item}\n"
     result_file.write_text(content, encoding="utf-8")
 
@@ -232,6 +240,8 @@ def _write_result_json(
         "plagiarism": {
             "detected": summary.plagiarism_detected,
             "matches": summary.plagiarism_matches or [],
+            "risk_score": summary.plagiarism_risk_score,
+            "evidence": summary.plagiarism_evidence or [],
         },
         "score": summary.score,
     }
@@ -321,6 +331,95 @@ def _compute_fingerprint(student_file: Path, language: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
+def _tokenize_source(source: str, language: str) -> list[str]:
+    if language == "python":
+        source = re.sub(r"#.*", "", source)
+    elif language == "java":
+        source = re.sub(r"//.*", "", source)
+        source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
+    return re.findall(r"[A-Za-z_]\w*|\d+|==|!=|<=|>=|[{}()[\],.;:+\-*/%]", source)
+
+
+def _jaccard_similarity(tokens_a: list[str], tokens_b: list[str]) -> float:
+    set_a = set(tokens_a)
+    set_b = set(tokens_b)
+    if not set_a and not set_b:
+        return 1.0
+    union = set_a | set_b
+    if not union:
+        return 0.0
+    return len(set_a & set_b) / len(union)
+
+
+def _python_structure_signature(source: str) -> list[str]:
+    tree = ast.parse(source)
+    return [type(node).__name__ for node in ast.walk(tree)]
+
+
+def _multiset_overlap_similarity(items_a: list[str], items_b: list[str]) -> float:
+    from collections import Counter
+
+    counter_a = Counter(items_a)
+    counter_b = Counter(items_b)
+    if not counter_a and not counter_b:
+        return 1.0
+    common = sum((counter_a & counter_b).values())
+    total = sum((counter_a | counter_b).values())
+    if total == 0:
+        return 0.0
+    return common / total
+
+
+def _java_structure_signature(source: str) -> list[str]:
+    # Lightweight structure proxy for Java when full AST parser is not available.
+    signature: list[str] = []
+    keywords = [
+        "class",
+        "public",
+        "private",
+        "protected",
+        "static",
+        "if",
+        "else",
+        "for",
+        "while",
+        "switch",
+        "return",
+        "new",
+        "try",
+        "catch",
+    ]
+    for kw in keywords:
+        signature.extend([kw] * len(re.findall(rf"\b{kw}\b", source)))
+    signature.extend(["{"] * source.count("{"))
+    signature.extend(["}"] * source.count("}"))
+    signature.extend(["("] * source.count("("))
+    signature.extend([")"] * source.count(")"))
+    return signature
+
+
+def _compute_similarity_signals(file_a: Path, file_b: Path, language: str) -> tuple[float, float]:
+    source_a = file_a.read_text(encoding="utf-8")
+    source_b = file_b.read_text(encoding="utf-8")
+    tokens_a = _tokenize_source(source_a, language)
+    tokens_b = _tokenize_source(source_b, language)
+    token_similarity = _jaccard_similarity(tokens_a, tokens_b)
+
+    if language == "python":
+        try:
+            struct_a = _python_structure_signature(source_a)
+            struct_b = _python_structure_signature(source_b)
+        except SyntaxError:
+            struct_a = tokens_a
+            struct_b = tokens_b
+    else:
+        struct_a = _java_structure_signature(source_a)
+        struct_b = _java_structure_signature(source_b)
+
+    structure_similarity = _multiset_overlap_similarity(struct_a, struct_b)
+    return token_similarity, structure_similarity
+
+
 def _detect_plagiarism(
     repo_root: Path,
     student_file: Path,
@@ -328,11 +427,17 @@ def _detect_plagiarism(
     problem_id: str,
     current_username: str,
     current_fingerprint: str,
-) -> tuple[bool, list[str]]:
+) -> tuple[bool, list[str], float, list[str]]:
     matches: list[str] = []
+    evidence: list[str] = []
+    max_risk = 0.0
     submissions_dir = repo_root / "submissions"
     if not submissions_dir.exists():
-        return False, matches
+        return False, matches, max_risk, evidence
+
+    token_threshold = 0.88
+    structure_threshold = 0.9
+    combined_threshold = 0.9
 
     for file in submissions_dir.rglob(f"*{student_file.suffix.lower()}"):
         if file.resolve() == student_file.resolve():
@@ -350,9 +455,34 @@ def _detect_plagiarism(
         except OSError:
             continue
         if other_fp == current_fingerprint:
-            matches.append(f"{username}: {file.relative_to(repo_root)}")
+            matches.append(f"{username}: {file.relative_to(repo_root)} (exact fingerprint match)")
+            evidence.append(f"Exact normalized fingerprint match with {username}")
+            max_risk = max(max_risk, 100.0)
+            continue
 
-    return (len(matches) > 0), matches
+        try:
+            token_sim, struct_sim = _compute_similarity_signals(student_file, file, language)
+        except OSError:
+            continue
+
+        combined = (token_sim + struct_sim) / 2.0
+        risk = round(
+            min(100.0, max(token_sim * 50.0 + struct_sim * 50.0, combined * 100.0)),
+            2,
+        )
+        max_risk = max(max_risk, risk)
+
+        if token_sim >= token_threshold or struct_sim >= structure_threshold or combined >= combined_threshold:
+            matches.append(
+                f"{username}: {file.relative_to(repo_root)} "
+                f"(token={token_sim:.2f}, structure={struct_sim:.2f}, combined={combined:.2f})"
+            )
+            evidence.append(
+                f"High similarity with {username}: token={token_sim:.2f}, structure={struct_sim:.2f}, combined={combined:.2f}"
+            )
+
+    detected = len(matches) > 0
+    return detected, matches, max_risk, evidence
 
 
 def _append_attempt_history(
@@ -380,6 +510,7 @@ def _append_attempt_history(
         "total_cases": summary.total,
         "anti_cheat_passed": summary.anti_cheat_passed,
         "plagiarism_detected": summary.plagiarism_detected,
+        "plagiarism_risk_score": summary.plagiarism_risk_score,
         "fingerprint": fingerprint,
     }
     with history_path.open("a", encoding="utf-8") as handle:
@@ -689,7 +820,7 @@ def evaluate_student(
         return 1
 
     fingerprint = _compute_fingerprint(student_file, language)
-    plagiarism_detected, plagiarism_matches = _detect_plagiarism(
+    plagiarism_detected, plagiarism_matches, plagiarism_risk_score, plagiarism_evidence = _detect_plagiarism(
         repo_root=repo_root,
         student_file=student_file,
         language=language,
@@ -711,6 +842,8 @@ def evaluate_student(
             anti_cheat_violations=violations,
             plagiarism_detected=plagiarism_detected,
             plagiarism_matches=plagiarism_matches,
+            plagiarism_risk_score=plagiarism_risk_score,
+            plagiarism_evidence=plagiarism_evidence,
         )
         _write_result(result_file=result_file, student_name=student_name, problem_id=problem_id, language=language, summary=summary)
         _write_result_json(result_file=result_file, student_name=student_name, problem_id=problem_id, language=language, summary=summary)
@@ -741,6 +874,8 @@ def evaluate_student(
     summary.anti_cheat_violations = []
     summary.plagiarism_detected = plagiarism_detected
     summary.plagiarism_matches = plagiarism_matches
+    summary.plagiarism_risk_score = plagiarism_risk_score
+    summary.plagiarism_evidence = plagiarism_evidence
     if plagiarism_detected:
         summary.score = max(round(summary.score * 0.7, 2), 0.0)
 
