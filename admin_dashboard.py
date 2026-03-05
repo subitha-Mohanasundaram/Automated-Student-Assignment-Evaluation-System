@@ -91,20 +91,27 @@ def render_html(summary: dict[str, object], rows: list[dict[str, object]]) -> st
 
     row_html = []
     for r in rows:
+        anti_cheat = str(r.get("anti_cheat", "")).upper()
+        plagiarism = str(r.get("plagiarism", "")).upper()
+        score = float(r.get("score", 0.0))
+        status = "PASS" if score >= 80.0 and anti_cheat == "PASS" and plagiarism != "DETECTED" else "FAIL"
+        status_color = "#0d7a2f" if status == "PASS" else "#a11d1d"
         row_html.append(
             "<tr>"
             f"<td>{r.get('github_username', '')}</td>"
+            f"<td>{r.get('email', '')}</td>"
             f"<td>{r.get('problem_id', '')}</td>"
             f"<td>{r.get('language', '')}</td>"
             f"<td>{r.get('anti_cheat', '')}</td>"
             f"<td>{r.get('plagiarism', '')}</td>"
             f"<td>{r.get('score', '')}</td>"
+            f"<td><b style='color:{status_color}'>{status}</b></td>"
             "</tr>"
         )
 
     table = (
-        "<table><thead><tr><th>User</th><th>Problem</th><th>Lang</th><th>Anti-Cheat</th>"
-        "<th>Plagiarism</th><th>Score</th></tr></thead>"
+        "<table><thead><tr><th>User</th><th>Email</th><th>Problem</th><th>Lang</th><th>Anti-Cheat</th>"
+        "<th>Plagiarism</th><th>Score</th><th>Status</th></tr></thead>"
         f"<tbody>{''.join(row_html)}</tbody></table>"
     )
     return f"""<!doctype html>
