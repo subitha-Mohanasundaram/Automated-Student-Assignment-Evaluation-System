@@ -8,6 +8,7 @@ on:
 permissions:
   actions: read
   contents: read
+  issues: write
 
 jobs:
   email-result:
@@ -45,36 +46,20 @@ jobs:
         shell: bash
         run: |
           ACTOR=$(cat artifacts/actor.txt)
-          LINE=$(awk -F, -v u="$ACTOR" '$1==u {print $0}' students.csv)
-
-          if [ -z "$LINE" ]; then
-            echo "No mapping for $ACTOR. Using fallback admin email."
-            NAME="$ACTOR"
-            EMAIL="${{ secrets.ADMIN_EMAIL }}"
-            MAPPED="false"
-          else
-            NAME=$(echo "$LINE" | awk -F, '{print $2}')
-            EMAIL=$(echo "$LINE" | awk -F, '{print $3}')
-            MAPPED="true"
-          fi
-
-          if [ -z "$EMAIL" ]; then
-            echo "Email is empty (mapping + fallback missing) for GitHub user: $ACTOR"
-            exit 1
-          fi
-
-          echo "name=$NAME" >> "$GITHUB_OUTPUT"
-          echo "email=$EMAIL" >> "$GITHUB_OUTPUT"
-          echo "actor=$ACTOR" >> "$GITHUB_OUTPUT"
-          echo "mapped=$MAPPED" >> "$GITHUB_OUTPUT"
+          python workflow_helpers.py resolve \
+            --students-file students.csv \
+            --actor "$ACTOR" \
+            --admin-email "${{ secrets.ADMIN_EMAIL }}" \
+            --github-output "$GITHUB_OUTPUT" \
+            --unmapped-csv artifacts/unmapped_students.csv \
+            --workflow-run-id "${{ github.event.workflow_run.id }}" \
+            --workflow-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}"
 
       - name: Record unmapped user for admin review
         if: ${{ steps.student.outputs.mapped == 'false' }}
         shell: bash
         run: |
-          TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          echo "github_username,detected_at_utc,workflow_run_id,workflow_url" > artifacts/unmapped_students.csv
-          echo "${{ steps.student.outputs.actor }},$TS,${{ github.event.workflow_run.id }},${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}" >> artifacts/unmapped_students.csv
+          echo "Unmapped actor detected and recorded: ${{ steps.student.outputs.actor }}"
 
       - name: Upload unmapped-user artifact
         if: ${{ steps.student.outputs.mapped == 'false' }}
@@ -83,6 +68,71 @@ jobs:
           name: unmapped-student-${{ github.event.workflow_run.id }}
           path: artifacts/unmapped_students.csv
           if-no-files-found: error
+          retention-days: 14
+
+      - name: Create tracking issue for unmapped user
+        if: ${{ steps.student.outputs.mapped == 'false' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const actor = `${{ steps.student.outputs.actor }}`;
+            const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}`;
+            const title = `Unmapped student detected: ${actor}`;
+            const body = [
+              "Automated alert from Send Result Email workflow.",
+              "",
+              `- GitHub username: \`${actor}\``,
+              `- Workflow run: ${runUrl}`,
+              "",
+              "Please add this user to `students.csv` with student_name and email."
+            ].join("\n");
+
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              per_page: 100
+            });
+            const existing = issues.data.find((i) => i.title === title);
+            if (existing) {
+              core.info(`Tracking issue already exists: #${existing.number}`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body
+              });
+              core.info(`Created tracking issue #${created.data.number}`);
+            }
+
+      - name: Comment on PR for unmapped user
+        if: ${{ steps.student.outputs.mapped == 'false' && github.event.workflow_run.event == 'pull_request' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prs = context.payload.workflow_run.pull_requests || [];
+            if (!prs.length) {
+              core.info("No pull request found on workflow_run payload.");
+              return;
+            }
+            const actor = `${{ steps.student.outputs.actor }}`;
+            const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}`;
+            const body = [
+              `Automated notice: no students.csv mapping found for \`${actor}\`.`,
+              `Fallback recipient was used.`,
+              `Workflow run: ${runUrl}`,
+              "Please update students.csv."
+            ].join("\n");
+            for (const pr of prs) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body
+              });
+              core.info(`Commented on PR #${pr.number}`);
+            }
 
       - name: Send result email
         env:

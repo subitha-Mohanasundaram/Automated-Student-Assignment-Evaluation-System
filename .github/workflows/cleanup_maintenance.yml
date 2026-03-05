@@ -1,0 +1,36 @@
+name: Cleanup Maintenance
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    name: Cleanup Old Results
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run cleanup
+        run: |
+          python cleanup_results.py --history-days 90 --local-run-days 30 --batch-days 30 --report-file results/cleanup_report.txt
+
+      - name: Upload cleanup report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cleanup-report-${{ github.run_id }}
+          path: results/cleanup_report.txt
+          if-no-files-found: error
+          retention-days: 14

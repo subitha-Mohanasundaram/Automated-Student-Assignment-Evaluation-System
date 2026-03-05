@@ -24,5 +24,15 @@
       ["1 2 3|0", "1 2 3"],
       ["7 8 9 10|5", "8 9 10 7"]
     ]
+  },
+  "anti_cheat": {
+    "python": {
+      "disallowed_import_roots": [],
+      "disallowed_calls": [],
+      "disallowed_ast_nodes": []
+    },
+    "java": {
+      "disallowed_patterns": ["\\bjava\\.io\\.File\\b"]
+    }
   }
 }

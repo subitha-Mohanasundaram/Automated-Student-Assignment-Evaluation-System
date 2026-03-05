@@ -49,6 +49,7 @@ class ProblemConfig:
     java_contract: dict[str, str]
     java_visible_cases: list[list[object]]
     java_hidden_cases: list[list[object]]
+    anti_cheat: dict[str, object]
 
 
 def parse_args() -> argparse.Namespace:
@@ -104,6 +105,7 @@ def _load_problem_config(problem_id: str) -> ProblemConfig:
         java_contract=raw["java"]["contract"],
         java_visible_cases=raw["java"]["visible_cases"],
         java_hidden_cases=raw["java"]["hidden_cases"],
+        anti_cheat=raw.get("anti_cheat", {}),
     )
 
 
@@ -265,9 +267,14 @@ def _run_pytest(student_file: Path, test_file: Path, junit_xml_path: Path) -> su
     return subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=20)
 
 
-def _run_python_anti_cheat(student_file: Path) -> list[str]:
+def _run_python_anti_cheat(student_file: Path, anti_cheat_cfg: dict[str, object] | None = None) -> list[str]:
+    cfg = anti_cheat_cfg or {}
+    python_cfg = cfg.get("python", {}) if isinstance(cfg, dict) else {}
     disallowed_import_roots = {"os", "subprocess", "socket", "requests", "http", "urllib"}
+    disallowed_import_roots.update(set(python_cfg.get("disallowed_import_roots", [])))
     disallowed_calls = {"eval", "exec", "compile", "__import__"}
+    disallowed_calls.update(set(python_cfg.get("disallowed_calls", [])))
+    disallowed_nodes = set(python_cfg.get("disallowed_ast_nodes", []))
     violations: list[str] = []
 
     source = student_file.read_text(encoding="utf-8")
@@ -287,6 +294,8 @@ def _run_python_anti_cheat(student_file: Path) -> list[str]:
         elif isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name) and node.func.id in disallowed_calls:
                 violations.append(f"Disallowed function call: {node.func.id}(...)")
+        if type(node).__name__ in disallowed_nodes:
+            violations.append(f"Disallowed AST node: {type(node).__name__}")
 
     seen: set[str] = set()
     unique_violations: list[str] = []
@@ -297,7 +306,9 @@ def _run_python_anti_cheat(student_file: Path) -> list[str]:
     return unique_violations
 
 
-def _run_java_anti_cheat(student_file: Path) -> list[str]:
+def _run_java_anti_cheat(student_file: Path, anti_cheat_cfg: dict[str, object] | None = None) -> list[str]:
+    cfg = anti_cheat_cfg or {}
+    java_cfg = cfg.get("java", {}) if isinstance(cfg, dict) else {}
     disallowed_patterns = [
         r"\bProcessBuilder\b",
         r"\bRuntime\s*\.\s*getRuntime\s*\(",
@@ -305,6 +316,7 @@ def _run_java_anti_cheat(student_file: Path) -> list[str]:
         r"\bjava\.net\b",
         r"\bjava\.nio\.file\b",
     ]
+    disallowed_patterns.extend(list(java_cfg.get("disallowed_patterns", [])))
     source = student_file.read_text(encoding="utf-8")
     violations: list[str] = []
     for pattern in disallowed_patterns:
@@ -812,9 +824,9 @@ def evaluate_student(
 
     try:
         if language == "python":
-            violations = _run_python_anti_cheat(student_file)
+            violations = _run_python_anti_cheat(student_file, config.anti_cheat)
         else:
-            violations = _run_java_anti_cheat(student_file)
+            violations = _run_java_anti_cheat(student_file, config.anti_cheat)
     except (OSError, SyntaxError) as exc:
         print(f"Error: anti-cheat failed: {exc}")
         return 1
