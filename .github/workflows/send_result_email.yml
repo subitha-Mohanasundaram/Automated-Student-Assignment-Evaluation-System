@@ -51,9 +51,11 @@ jobs:
             echo "No mapping for $ACTOR. Using fallback admin email."
             NAME="$ACTOR"
             EMAIL="${{ secrets.ADMIN_EMAIL }}"
+            MAPPED="false"
           else
             NAME=$(echo "$LINE" | awk -F, '{print $2}')
             EMAIL=$(echo "$LINE" | awk -F, '{print $3}')
+            MAPPED="true"
           fi
 
           if [ -z "$EMAIL" ]; then
@@ -64,7 +66,23 @@ jobs:
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           echo "email=$EMAIL" >> "$GITHUB_OUTPUT"
           echo "actor=$ACTOR" >> "$GITHUB_OUTPUT"
+          echo "mapped=$MAPPED" >> "$GITHUB_OUTPUT"
 
+      - name: Record unmapped user for admin review
+        if: ${{ steps.student.outputs.mapped == 'false' }}
+        shell: bash
+        run: |
+          TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "github_username,detected_at_utc,workflow_run_id,workflow_url" > artifacts/unmapped_students.csv
+          echo "${{ steps.student.outputs.actor }},$TS,${{ github.event.workflow_run.id }},${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}" >> artifacts/unmapped_students.csv
+
+      - name: Upload unmapped-user artifact
+        if: ${{ steps.student.outputs.mapped == 'false' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unmapped-student-${{ github.event.workflow_run.id }}
+          path: artifacts/unmapped_students.csv
+          if-no-files-found: error
 
       - name: Send result email
         env:
@@ -79,3 +97,7 @@ jobs:
         run: |
           echo "Email attempted for GitHub user: ${{ steps.student.outputs.actor }}"
           echo "Recipient: ${{ steps.student.outputs.email }}"
+          echo "Mapped user in students.csv: ${{ steps.student.outputs.mapped }}"
+          if [ "${{ steps.student.outputs.mapped }}" = "false" ]; then
+            echo "Admin action required: add this GitHub username to students.csv"
+          fi
