@@ -51,6 +51,7 @@ Transparent scoring output:
 - `result.txt`: human-readable breakdown
 - `result.json`: structured scoring details (weights, contributions, anti-cheat, plagiarism)
 - includes plagiarism risk score + similarity evidence for review workflows
+- plagiarism scoring uses exact fingerprint + token similarity + structure similarity signals
 
 ## Run Project Tests
 
