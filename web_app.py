@@ -2452,11 +2452,52 @@ async def submission_delete(request: Request, evaluation_id: str = Form(...)):
     return RedirectResponse(url="/me", status_code=303)
 
 
+def _start_background_worker() -> None:
+    """Start the job worker in a daemon thread when no separate worker process exists.
+
+    On Render free tier there is no background worker service, so we run the
+    worker loop inside the web process itself. Set DISABLE_EMBEDDED_WORKER=1
+    to turn this off (e.g. when you have a dedicated worker dyno/service).
+    """
+    if os.environ.get("DISABLE_EMBEDDED_WORKER", "").strip() == "1":
+        return
+    import threading
+
+    def _worker_loop() -> None:
+        try:
+            # Re-use the same worker logic
+            import time as _time
+            from assignment_intel.db import claim_next_job, update_job_finished
+            from worker import process_job
+            print("[embedded-worker] started", flush=True)
+            while True:
+                try:
+                    job = claim_next_job(types=["problem_generation", "solution_evaluation"])
+                    if job:
+                        try:
+                            process_job(job)
+                        except Exception as exc:
+                            try:
+                                update_job_finished(job_id=int(job["id"]), status="failed", error=str(exc), result=None)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+                _time.sleep(1.0)
+        except Exception as exc:
+            print(f"[embedded-worker] fatal: {exc}", flush=True)
+
+    t = threading.Thread(target=_worker_loop, daemon=True, name="embedded-worker")
+    t.start()
+    print("[embedded-worker] thread launched", flush=True)
+
+
 def main() -> None:
     try:
         import uvicorn
     except Exception as exc:  # pragma: no cover
         raise RuntimeError("uvicorn missing; run: pip install -r requirements.txt") from exc
+    _start_background_worker()
     port = int(os.environ.get("PORT", 8080))
     uvicorn.run("web_app:app", host="0.0.0.0", port=port, reload=False)
 
