@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+
+{% block head %}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+  <!-- Header -->
+  <div class="section-header">
+    <div>
+      <div class="inline-flex items-center gap-2 rounded-full bg-violet-50 px-3 py-1 text-[11px] font-semibold text-violet-700 dark:bg-violet-500/15 dark:text-violet-300 mb-2">
+        <span data-lucide="bar-chart-3" class="h-3 w-3"></span>
+        Instructor Analytics
+      </div>
+      <h1 class="section-title">Analytics</h1>
+      <p class="section-subtitle">Submission trends, language distribution, and student performance.</p>
+    </div>
+  </div>
+
+  <!-- Metric cards -->
+  <div class="grid grid-cols-2 gap-4 lg:grid-cols-4 mb-6">
+    <!-- Total submissions -->
+    <div class="card stat-card">
+      <div class="stat-accent bg-gradient-to-r from-brand-500 to-violet-500"></div>
+      <div class="flex items-start justify-between gap-3 pt-1">
+        <div>
+          <div class="stat-label">Total Submissions</div>
+          <div class="stat-value mt-2 text-slate-900 dark:text-white">{{ metrics.total_submissions }}</div>
+        </div>
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 dark:bg-brand-500/15 shrink-0">
+          <span data-lucide="send" class="h-5 w-5 text-brand-600 dark:text-brand-400"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Unique students -->
+    <div class="card stat-card">
+      <div class="stat-accent bg-gradient-to-r from-emerald-500 to-teal-500"></div>
+      <div class="flex items-start justify-between gap-3 pt-1">
+        <div>
+          <div class="stat-label">Unique Students</div>
+          <div class="stat-value mt-2 text-slate-900 dark:text-white">{{ metrics.unique_students }}</div>
+        </div>
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 dark:bg-emerald-500/15 shrink-0">
+          <span data-lucide="users" class="h-5 w-5 text-emerald-600 dark:text-emerald-400"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Average score -->
+    <div class="card stat-card">
+      <div class="stat-accent bg-gradient-to-r from-amber-400 to-orange-500"></div>
+      <div class="flex items-start justify-between gap-3 pt-1">
+        <div>
+          <div class="stat-label">Average Score</div>
+          <div class="stat-value mt-2 text-slate-900 dark:text-white">{{ metrics.avg_score }}</div>
+        </div>
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 dark:bg-amber-500/15 shrink-0">
+          <span data-lucide="target" class="h-5 w-5 text-amber-600 dark:text-amber-400"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Languages -->
+    <div class="card stat-card">
+      <div class="stat-accent bg-gradient-to-r from-sky-500 to-cyan-500"></div>
+      <div class="flex items-start justify-between gap-3 pt-1">
+        <div>
+          <div class="stat-label">Languages Used</div>
+          <div class="mt-2 font-mono text-sm font-bold text-slate-700 dark:text-slate-200">
+            {% if metrics.language_usage %}
+              {{ metrics.language_usage.keys() | list | join(", ") }}
+            {% else %}–{% endif %}
+          </div>
+        </div>
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 dark:bg-sky-500/15 shrink-0">
+          <span data-lucide="code-2" class="h-5 w-5 text-sky-600 dark:text-sky-400"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Charts + recent submissions -->
+  <div class="grid grid-cols-1 gap-5 lg:grid-cols-2 mb-5">
+    <!-- Language pie chart -->
+    <div class="card">
+      <h2 class="text-[14px] font-bold text-slate-900 dark:text-white mb-4">Language Distribution</h2>
+      <div class="relative h-56 flex items-center justify-center">
+        <canvas id="langChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Recent submissions table -->
+    <div class="card overflow-x-auto">
+      <h2 class="text-[14px] font-bold text-slate-900 dark:text-white mb-4">Recent Submissions</h2>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Problem</th>
+            <th>Lang</th>
+            <th>Score</th>
+            <th class="text-right">Code</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in recent %}
+            <tr>
+              <td>
+                <div class="flex items-center gap-2">
+                  <div class="avatar h-6 w-6 text-[10px] shrink-0">{{ r.username[:1]|upper }}</div>
+                  <span class="font-mono text-[12px] text-slate-700 dark:text-slate-200">{{ r.username }}</span>
+                </div>
+              </td>
+              <td class="font-mono text-[12px] text-slate-500 dark:text-slate-400">{{ r.problem_id }}</td>
+              <td><span class="badge">{{ r.language }}</span></td>
+              <td>
+                {% set sc = r.score | float %}
+                <span class="font-mono font-bold text-[13px] {{ 'text-emerald-600 dark:text-emerald-400' if sc >= 80 else ('text-amber-600 dark:text-amber-400' if sc >= 50 else 'text-red-600 dark:text-red-400') }}">
+                  {{ r.score }}
+                </span>
+              </td>
+              <td class="text-right">
+                {% if r.submission_id %}
+                  <a class="btn btn-secondary btn-sm py-1 px-2" href="/instructor/submission?submission_id={{ r.submission_id }}" title="View code">
+                    <span data-lucide="code-2" class="h-3.5 w-3.5"></span>
+                  </a>
+                {% else %}
+                  <span class="text-slate-300 dark:text-slate-700">–</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+          {% if not recent %}
+            <tr>
+              <td colspan="5" class="py-8 text-center text-sm text-slate-400">No submissions yet.</td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Submission rate line chart -->
+  <div class="card">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-[14px] font-bold text-slate-900 dark:text-white">Submission Rate</h2>
+      <span class="badge info">Last 14 days</span>
+    </div>
+    <div class="h-56">
+      <canvas id="submitChart"></canvas>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    const isDark = document.documentElement.classList.contains('dark');
+    const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+    const textColor = isDark ? '#94a3b8' : '#64748b';
+    const fontFamily = "'Inter', ui-sans-serif, sans-serif";
+
+    // Language donut chart
+    (function() {
+      const data = {{ metrics.language_usage|tojson }};
+      const labels = Object.keys(data || {});
+      const values = labels.map(k => data[k]);
+      const ctx = document.getElementById("langChart");
+      if (!ctx || !labels.length) return;
+
+      const colors = ['#6366f1','#8b5cf6','#06b6d4','#10b981','#f59e0b','#ef4444','#ec4899'];
+
+      new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels,
+          datasets: [{
+            data: values,
+            backgroundColor: colors,
+            borderColor: isDark ? '#1e293b' : '#ffffff',
+            borderWidth: 3,
+            hoverOffset: 6,
+          }]
+        },
+        options: {
+          cutout: '68%',
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { color: textColor, font: { family: fontFamily, size: 12, weight: '600' }, padding: 16, boxWidth: 12, borderRadius: 4 }
+            }
+          }
+        }
+      });
+    })();
+
+    // Submission rate line chart
+    (function() {
+      const series = {{ submission_rate|default({"labels": [], "counts": []}, true)|tojson }};
+      const labels = (series && series.labels) ? series.labels : [];
+      const values = (series && series.counts) ? series.counts : [];
+      const ctx = document.getElementById("submitChart");
+      if (!ctx) return;
+
+      new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Submissions',
+            data: values,
+            borderColor: '#6366f1',
+            backgroundColor: 'rgba(99,102,241,0.12)',
+            fill: true,
+            tension: 0.4,
+            pointRadius: 4,
+            pointBackgroundColor: '#6366f1',
+            pointBorderColor: isDark ? '#1e293b' : '#ffffff',
+            pointBorderWidth: 2,
+            pointHoverRadius: 6,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: isDark ? '#1e293b' : '#0f172a',
+              titleFont: { family: fontFamily, size: 12 },
+              bodyFont: { family: fontFamily, size: 13 },
+              padding: 10,
+              cornerRadius: 8,
+            }
+          },
+          scales: {
+            x: {
+              grid: { color: gridColor, drawTicks: false },
+              ticks: { color: textColor, font: { family: fontFamily, size: 11 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 7 }
+            },
+            y: {
+              beginAtZero: true,
+              grid: { color: gridColor, drawTicks: false },
+              ticks: { color: textColor, font: { family: fontFamily, size: 11 }, precision: 0 }
+            }
+          }
+        }
+      });
+    })();
+  </script>
+{% endblock %}

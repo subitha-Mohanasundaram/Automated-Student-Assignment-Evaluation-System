@@ -1,0 +1,103 @@
+{% set role = (user.role or "")|lower %}
+{% set path = request.url.path %}
+{% set initials = user.username[:2]|upper %}
+
+<div class="sticky top-[61px] space-y-2">
+  <!-- User card -->
+  <div class="card card-glass p-4">
+    <div class="flex items-center gap-3">
+      <div class="avatar h-11 w-11 text-sm shrink-0">{{ initials }}</div>
+      <div class="min-w-0 flex-1">
+        <div class="truncate text-[13px] font-bold text-slate-900 dark:text-white">{{ user.username }}</div>
+        <div class="mt-1 flex items-center gap-1.5">
+          <span class="badge {{ 'ok' if role == 'student' else 'info' }} text-[10px]">{{ role }}</span>
+        </div>
+      </div>
+      <a href="/me"
+         class="shrink-0 rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-brand-300 hover:text-brand-600 dark:border-slate-700 dark:bg-slate-800 dark:hover:border-brand-600 dark:hover:text-brand-400 transition"
+         title="My dashboard">
+        <span data-lucide="layout-dashboard" class="h-3.5 w-3.5"></span>
+      </a>
+    </div>
+  </div>
+
+  <!-- Navigation -->
+  <div class="card card-glass p-3">
+    <nav class="space-y-0.5 text-[13px]">
+      {% macro item(href, label, icon) -%}
+        {% set active = (path == href) or (href != "/" and path.startswith(href)) %}
+        <a
+          href="{{ href }}"
+          class="group relative flex items-center gap-2.5 rounded-xl px-3 py-2.5 font-semibold transition-all duration-150
+                 {{ 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300' if active else 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-100' }}"
+        >
+          {% if active %}
+            <span class="absolute left-0 top-1 bottom-1 w-0.5 rounded-r-full bg-brand-500"></span>
+          {% endif %}
+          <span data-lucide="{{ icon }}"
+                class="h-4 w-4 shrink-0 transition-transform duration-150 group-hover:scale-110
+                       {{ 'text-brand-600 dark:text-brand-400' if active else 'opacity-60 group-hover:opacity-100' }}">
+          </span>
+          <span>{{ label }}</span>
+        </a>
+      {%- endmacro %}
+
+      {% if role == "student" %}
+        {{ item("/assignments", "Assignments", "list-checks") }}
+        {{ item("/leaderboards", "Leaderboards", "trophy") }}
+        {{ item("/me", "My Dashboard", "user-round") }}
+      {% else %}
+        {{ item("/instructor/assignments", "Instructor Panel", "clipboard-list") }}
+        {{ item("/instructor/analytics", "Analytics", "bar-chart-3") }}
+        {{ item("/leaderboards", "Leaderboards", "trophy") }}
+        {% if role == "admin" %}
+          {{ item("/admin", "Admin", "shield-check") }}
+        {% endif %}
+      {% endif %}
+      {% if role != "student" %}
+        {{ item("/reports", "Reports", "file-text") }}
+      {% endif %}
+    </nav>
+  </div>
+
+  <!-- Presence indicator -->
+  <div class="card card-glass px-4 py-3">
+    <div class="flex items-center justify-between gap-2 text-[12px]">
+      <div class="flex items-center gap-2 text-slate-500 dark:text-slate-400">
+        <span class="relative flex h-2 w-2">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60"></span>
+          <span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+        </span>
+        <span class="font-medium">Active now</span>
+      </div>
+      <span id="presenceCount" class="font-mono font-bold text-slate-700 dark:text-slate-200">–</span>
+    </div>
+    <div class="mt-1 text-[11px] text-slate-400 dark:text-slate-500">Users on this page</div>
+  </div>
+</div>
+
+<script>
+  (function() {
+    const page = location.pathname;
+    const key = "presence_client_id";
+    let clientId = localStorage.getItem(key);
+    if (!clientId) {
+      clientId = (crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now() + "-" + Math.random());
+      localStorage.setItem(key, clientId);
+    }
+    async function ping() {
+      try {
+        const res = await fetch("/presence/ping", {
+          method: "POST",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify({page, client_id: clientId}),
+        });
+        const data = await res.json();
+        const el = document.getElementById("presenceCount");
+        if (el && data && data.count != null) el.textContent = String(data.count);
+      } catch (e) {}
+    }
+    ping();
+    setInterval(ping, 15000);
+  })();
+</script>

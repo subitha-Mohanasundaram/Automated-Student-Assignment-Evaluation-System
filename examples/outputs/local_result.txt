@@ -1,0 +1,25 @@
+Student Name: Subitha
+Problem ID: add_numbers
+Language: java
+Total Test Cases: 7
+Passed Cases: 7
+Visible Passed: 4/4
+Hidden Passed: 3/3
+Visible Weight: 0.6
+Hidden Weight: 0.4
+Visible Score Percent: 100.0
+Hidden Score Percent: 100.0
+Weighted Visible Contribution: 60.0
+Weighted Hidden Contribution: 40.0
+Anti-Cheat: PASS
+Plagiarism: DETECTED
+Plagiarism Risk Score: 100.0
+Score: 70.0
+Plagiarism Matches:
+- new-unmapped-user: submissions\new-unmapped-user\student_solution.java (exact fingerprint match)
+- temp-user: submissions\temp-user\student_solution.java (exact fingerprint match)
+- unknown-user: submissions\unknown-user\student_solution.java (exact fingerprint match)
+Plagiarism Evidence:
+- Exact normalized fingerprint match with new-unmapped-user
+- Exact normalized fingerprint match with temp-user
+- Exact normalized fingerprint match with unknown-user

@@ -1,0 +1,87 @@
+<header class="sticky top-0 z-40 border-b border-slate-200 bg-white/80 backdrop-blur dark:border-slate-800 dark:bg-slate-950/70">
+  <div class="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+    <a class="flex items-center gap-3" href="/">
+      <div class="grid h-9 w-9 place-items-center rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900">
+        <span data-lucide="code-2"></span>
+      </div>
+      <div class="leading-tight">
+        <div class="font-semibold">Mini-LeetCode</div>
+        <div class="text-xs text-slate-500 dark:text-slate-400">AI coding evaluation</div>
+      </div>
+    </a>
+
+    {% if user %}
+      <nav class="hidden items-center gap-6 md:flex">
+        <a class="text-sm font-medium text-slate-700 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white" href="/assignments">Assignments</a>
+        <a class="text-sm font-medium text-slate-700 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white" href="/leaderboards">Leaderboards</a>
+        <a class="text-sm font-medium text-slate-700 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white" href="/me">Dashboard</a>
+      </nav>
+    {% endif %}
+
+    <div class="flex items-center gap-2">
+      <button
+        class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800"
+        id="themeBtn"
+        type="button"
+        title="Toggle theme"
+      >
+        <span class="inline-flex items-center gap-2">
+          <span data-lucide="moon" class="h-4 w-4"></span>
+          <span class="hidden sm:inline">Theme</span>
+        </span>
+      </button>
+
+      {% if user %}
+        <div class="ml-1 hidden items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900 sm:flex">
+          <div class="grid h-7 w-7 place-items-center rounded-lg bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <span data-lucide="user" class="h-4 w-4"></span>
+          </div>
+          <div class="text-sm">
+            <div class="font-semibold leading-none">{{ user.username }}</div>
+            <div class="mt-1 inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              {{ user.role }}
+            </div>
+          </div>
+        </div>
+
+        {% if user.role in ["instructor", "admin"] %}
+          <a class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800"
+             href="/instructor/assignments">Instructor</a>
+          <a class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800"
+             href="/instructor/analytics">Analytics</a>
+        {% endif %}
+
+        {% if user.role == "admin" %}
+          <a class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800"
+             href="/admin">Admin</a>
+        {% endif %}
+
+        <form action="/auth/logout" method="post">
+          <button class="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+                  type="submit">
+            Logout
+          </button>
+        </form>
+      {% else %}
+        <a class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800"
+           href="/register">Register</a>
+        <a class="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+           href="/login">Login</a>
+      {% endif %}
+    </div>
+  </div>
+</header>
+
+<script>
+  (function() {
+    const btn = document.getElementById("themeBtn");
+    if (!btn) return;
+    btn.addEventListener("click", () => {
+      const key = "theme";
+      const cur = localStorage.getItem(key) || "system";
+      const next = (cur === "dark") ? "light" : "dark";
+      localStorage.setItem(key, next);
+      document.documentElement.classList.toggle("dark", next === "dark");
+    });
+  })();
+</script>

@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+
+{% block head %}
+  <style>
+    .workspace { height: calc(100vh - 64px); }
+    .editorPane { height: calc(100vh - 64px - 160px); }
+    @media (max-width: 1024px) {
+      .workspace { height: auto; }
+      .editorPane { height: 420px; }
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="workspace grid grid-cols-1 gap-4 lg:grid-cols-12">
+    <aside class="card lg:col-span-4">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <div class="text-xs text-slate-500 dark:text-slate-400 font-mono">{{ problem_id }}</div>
+          <div class="text-lg font-semibold">{{ problem_title }}</div>
+        </div>
+        <a class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800"
+           href="/assignment?id={{ problem_id }}">Problem</a>
+      </div>
+
+      <details class="mt-4" open>
+        <summary class="cursor-pointer text-sm font-semibold">Description</summary>
+        <div class="mt-2 whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-200">{{ statement }}</div>
+      </details>
+
+      <div class="mt-4 text-xs text-slate-500 dark:text-slate-400">
+        Submit executes tests in the sandbox and redirects to evaluation status.
+      </div>
+    </aside>
+
+    <section class="lg:col-span-8">
+      <div class="card">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-2">
+            <div class="text-sm font-semibold">Editor</div>
+            <span class="badge">Ctrl+Enter submit</span>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <label class="text-xs font-semibold text-slate-500 dark:text-slate-400">Language</label>
+            <select id="langSelect"
+                    class="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm dark:border-slate-800 dark:bg-slate-900">
+              {% for l in ["python","java","javascript","c","cpp"] %}
+                <option value="{{ l }}" {% if l == language %}selected{% endif %}>{{ l }}</option>
+              {% endfor %}
+            </select>
+            <button id="resetBtn"
+                    class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800"
+                    type="button">Reset</button>
+            <button id="submitBtn"
+                    class="rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500"
+                    type="button">Submit</button>
+          </div>
+        </div>
+
+        <form id="codeForm" class="mt-4" action="/editor/submit" method="post">
+          <input type="hidden" name="problem_id" value="{{ problem_id }}" />
+          <input type="hidden" name="language" id="langField" value="{{ language }}" />
+          <input type="hidden" name="intent" id="intentField" value="submit" />
+          <input type="hidden" name="code" id="codeField" value="" />
+          <div class="rounded-2xl border border-slate-200 overflow-hidden dark:border-slate-800">
+            <div id="editor" class="editorPane"></div>
+          </div>
+        </form>
+
+        <div class="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-3">
+          <div class="rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 lg:col-span-2">
+            After you submit, use the evaluation page to view progress and results.
+          </div>
+          <a href="/me"
+             class="rounded-xl border border-slate-200 bg-white p-3 text-sm font-semibold hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800">
+            Back to Dashboard
+          </a>
+        </div>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    const STARTERS = {{ starters|tojson }};
+    function loadMonaco(cb) {
+      if (window.monaco) return cb();
+      const s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js";
+      s.onload = () => {
+        require.config({ paths: { vs: "https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs" }});
+        require(["vs/editor/editor.main"], cb);
+      };
+      document.head.appendChild(s);
+    }
+
+    (function() {
+      const langSelect = document.getElementById("langSelect");
+      const langField = document.getElementById("langField");
+      const codeField = document.getElementById("codeField");
+      const intentField = document.getElementById("intentField");
+      const form = document.getElementById("codeForm");
+      const resetBtn = document.getElementById("resetBtn");
+      const submitBtn = document.getElementById("submitBtn");
+
+      let editor = null;
+      function currentLang() { return (langSelect && langSelect.value) ? langSelect.value : "python"; }
+      function starterFor(lang) { return STARTERS[lang] || STARTERS["python"] || ""; }
+
+      loadMonaco(() => {
+        editor = monaco.editor.create(document.getElementById("editor"), {
+          value: {{ code|tojson }},
+          language: currentLang() === "cpp" ? "cpp" : currentLang(),
+          theme: document.documentElement.classList.contains("dark") ? "vs-dark" : "vs",
+          minimap: { enabled: false },
+          fontSize: 13,
+          automaticLayout: true
+        });
+        const obs = new MutationObserver(() => {
+          monaco.editor.setTheme(document.documentElement.classList.contains("dark") ? "vs-dark" : "vs");
+        });
+        obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+      });
+
+      function submit(intent) {
+        if (!editor) return;
+        langField.value = currentLang();
+        intentField.value = "submit";
+        codeField.value = editor.getValue();
+        form.submit();
+      }
+
+      if (langSelect) {
+        langSelect.addEventListener("change", () => {
+          if (!editor) return;
+          const l = currentLang();
+          monaco.editor.setModelLanguage(editor.getModel(), l === "cpp" ? "cpp" : l);
+        });
+      }
+      if (resetBtn) resetBtn.addEventListener("click", () => { if (editor) editor.setValue(starterFor(currentLang())); });
+      if (submitBtn) submitBtn.addEventListener("click", () => submit("submit"));
+
+      window.addEventListener("keydown", (e) => {
+        if (!editor) return;
+        if (e.ctrlKey && e.key === "Enter") { e.preventDefault(); submit("submit"); }
+      });
+    })();
+  </script>
+{% endblock %}

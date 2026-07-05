@@ -81,6 +81,21 @@ def build_message(
     visible = parsed.get("Visible Passed", "N/A")
     hidden = parsed.get("Hidden Passed", "N/A")
 
+    # AI Feedback — present only when the Explanation Agent ran.
+    ai_explanation = parsed.get("Explanation", "")
+    ai_likely_cause = parsed.get("Likely Cause", "")
+    ai_hint = parsed.get("Hint", "")
+
+    ai_section = ""
+    if ai_explanation and ai_explanation not in ("N/A", "All test cases passed successfully."):
+        ai_section = (
+            "\nAI Feedback\n"
+            "-----------\n"
+            f"Explanation  : {ai_explanation}\n"
+            f"Likely Cause : {ai_likely_cause}\n"
+            f"Hint         : {ai_hint}\n"
+        )
+
     message.set_content(
         f"Dear {student_label},\n\n"
         "Your coding submission has been evaluated.\n\n"
@@ -93,7 +108,8 @@ def build_message(
         f"Visible Tests: {visible}\n"
         f"Hidden Tests: {hidden}\n"
         f"Anti-Cheat Status: {anti_cheat}\n"
-        f"Plagiarism Status: {plagiarism}\n\n"
+        f"Plagiarism Status: {plagiarism}\n"
+        f"{ai_section}\n"
         "A detailed report is attached for complete scoring breakdown.\n\n"
         "If you need a review, reply to the assessment team with your submission details.\n\n"
         "Best regards,\n"

@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en" class="">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title or "EduEval AI — Automated Assignment Evaluation" }}</title>
+    <meta name="description" content="AI-powered automated student assignment evaluation with sandboxed testing, instant feedback, and instructor analytics." />
+
+    <!-- Inter font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+    <!-- Tailwind (CDN) -->
+    <script>
+      window.tailwind = {
+        config: {
+          darkMode: 'class',
+          theme: {
+            extend: {
+              fontFamily: {
+                sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+                mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+              },
+              colors: {
+                brand: {
+                  50:  '#eef2ff',
+                  100: '#e0e7ff',
+                  200: '#c7d2fe',
+                  300: '#a5b4fc',
+                  400: '#818cf8',
+                  500: '#6366f1',
+                  600: '#4f46e5',
+                  700: '#4338ca',
+                  800: '#3730a3',
+                  900: '#312e81',
+                },
+              },
+              animation: {
+                'fade-in': 'fadeIn 200ms ease-out both',
+                'slide-up': 'slideUp 220ms ease-out both',
+                'pulse-slow': 'pulse 3s ease-in-out infinite',
+              },
+              keyframes: {
+                fadeIn: {
+                  from: { opacity: '0', transform: 'translateY(6px)' },
+                  to:   { opacity: '1', transform: 'translateY(0)' },
+                },
+                slideUp: {
+                  from: { opacity: '0', transform: 'translateY(12px)' },
+                  to:   { opacity: '1', transform: 'translateY(0)' },
+                },
+              },
+            },
+          },
+        },
+      };
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Alpine.js -->
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <!-- Lucide icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+      /* ── Design tokens ─────────────────────────────────── */
+      :root {
+        --brand:        #6366f1;
+        --brand-light:  #818cf8;
+        --brand-dark:   #4f46e5;
+        --success:      #10b981;
+        --error:        #ef4444;
+        --warning:      #f59e0b;
+        --info:         #3b82f6;
+        --surface:      #ffffff;
+        --surface-2:    #f8fafc;
+        --border:       rgba(226, 232, 240, 0.8);
+        --text:         #0f172a;
+        --text-muted:   #64748b;
+        --radius-card:  16px;
+        --radius-btn:   10px;
+        --shadow-card:  0 1px 3px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.04);
+        --shadow-lg:    0 4px 6px rgba(0,0,0,.05), 0 10px 40px rgba(0,0,0,.08);
+      }
+      .dark {
+        --surface:      #1e293b;
+        --surface-2:    #0f172a;
+        --border:       rgba(51, 65, 85, 0.7);
+        --text:         #f1f5f9;
+        --text-muted:   #94a3b8;
+        --shadow-card:  0 1px 3px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.2);
+        --shadow-lg:    0 4px 6px rgba(0,0,0,.2), 0 10px 40px rgba(0,0,0,.3);
+      }
+
+      /* ── Base ───────────────────────────────────────────── */
+      *, *::before, *::after { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
+
+      /* ── Scrollbar ──────────────────────────────────────── */
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: rgba(99,102,241,.3); border-radius: 99px; }
+      ::-webkit-scrollbar-thumb:hover { background: rgba(99,102,241,.55); }
+
+      /* ── Card ───────────────────────────────────────────── */
+      .card {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-card);
+        padding: 20px;
+        background: var(--surface);
+        box-shadow: var(--shadow-card);
+        transition: box-shadow 200ms ease, transform 200ms ease;
+      }
+      .card-hover:hover {
+        box-shadow: var(--shadow-lg);
+        transform: translateY(-2px);
+      }
+      .card-glass {
+        background: rgba(255,255,255,.7);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255,255,255,.25);
+      }
+      .dark .card-glass {
+        background: rgba(30,41,59,.65);
+        border-color: rgba(255,255,255,.06);
+      }
+
+      /* ── Badges ─────────────────────────────────────────── */
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 2px 10px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: .02em;
+        border: 1px solid var(--border);
+        background: var(--surface-2);
+        color: var(--text-muted);
+      }
+      .badge.ok   { border-color: #bbf7d0; background: #dcfce7; color: #15803d; }
+      .badge.bad  { border-color: #fecaca; background: #fee2e2; color: #b91c1c; }
+      .badge.warn { border-color: #fde68a; background: #fef9c3; color: #b45309; }
+      .badge.info { border-color: #bfdbfe; background: #dbeafe; color: #1d4ed8; }
+      .dark .badge        { border-color: rgba(51,65,85,.8); background: rgba(15,23,42,.5); color: #94a3b8; }
+      .dark .badge.ok     { border-color: #14532d; background: rgba(20,83,45,.4); color: #4ade80; }
+      .dark .badge.bad    { border-color: #7f1d1d; background: rgba(127,29,29,.35); color: #fca5a5; }
+      .dark .badge.warn   { border-color: #92400e; background: rgba(146,64,14,.35); color: #fcd34d; }
+      .dark .badge.info   { border-color: #1e3a8a; background: rgba(30,58,138,.35); color: #93c5fd; }
+
+      /* ── Buttons ─────────────────────────────────────────── */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 8px 16px;
+        border-radius: var(--radius-btn);
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 160ms ease;
+        border: 1px solid transparent;
+        line-height: 1.4;
+        text-decoration: none;
+      }
+      .btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+      .btn-primary {
+        background: linear-gradient(135deg, #6366f1, #8b5cf6);
+        color: #fff;
+        box-shadow: 0 2px 8px rgba(99,102,241,.35);
+      }
+      .btn-primary:hover { background: linear-gradient(135deg, #4f46e5, #7c3aed); box-shadow: 0 4px 16px rgba(99,102,241,.45); transform: translateY(-1px); }
+      .btn-secondary {
+        background: var(--surface);
+        color: var(--text);
+        border-color: var(--border);
+        box-shadow: 0 1px 3px rgba(0,0,0,.06);
+      }
+      .btn-secondary:hover { background: var(--surface-2); box-shadow: 0 2px 8px rgba(0,0,0,.1); }
+      .btn-danger { background: #ef4444; color: #fff; box-shadow: 0 2px 8px rgba(239,68,68,.3); }
+      .btn-danger:hover { background: #dc2626; transform: translateY(-1px); }
+      .btn-success { background: #10b981; color: #fff; box-shadow: 0 2px 8px rgba(16,185,129,.3); }
+      .btn-success:hover { background: #059669; transform: translateY(-1px); }
+      .btn-sm { padding: 5px 12px; font-size: 12px; }
+      .btn-lg { padding: 12px 24px; font-size: 15px; }
+
+      /* ── Form elements ───────────────────────────────────── */
+      .form-input {
+        width: 100%;
+        padding: 10px 14px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+        font-size: 14px;
+        font-family: inherit;
+        outline: none;
+        transition: border-color 160ms ease, box-shadow 160ms ease;
+      }
+      .form-input:focus {
+        border-color: #818cf8;
+        box-shadow: 0 0 0 3px rgba(99,102,241,.15);
+      }
+      .form-input::placeholder { color: var(--text-muted); }
+      .form-label {
+        display: block;
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 6px;
+        color: var(--text);
+      }
+
+      /* ── Table ───────────────────────────────────────────── */
+      .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      .data-table thead th {
+        text-align: left;
+        padding: 10px 12px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: .05em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        border-bottom: 1px solid var(--border);
+      }
+      .data-table tbody tr { border-bottom: 1px solid var(--border); transition: background 120ms; }
+      .data-table tbody tr:last-child { border-bottom: none; }
+      .data-table tbody tr:hover { background: rgba(99,102,241,.04); }
+      .data-table tbody td { padding: 11px 12px; vertical-align: middle; }
+
+      /* ── Section header ──────────────────────────────────── */
+      .section-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+      .section-title {
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        color: var(--text);
+      }
+      .section-subtitle {
+        margin-top: 4px;
+        font-size: 13px;
+        color: var(--text-muted);
+      }
+
+      /* ── Stat card ───────────────────────────────────────── */
+      .stat-card { position: relative; overflow: hidden; }
+      .stat-card .stat-accent {
+        position: absolute; top: 0; left: 0; right: 0;
+        height: 3px;
+        border-radius: 16px 16px 0 0;
+      }
+      .stat-card .stat-value { font-size: 28px; font-weight: 800; font-family: 'JetBrains Mono', monospace; letter-spacing: -0.03em; }
+      .stat-card .stat-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); }
+
+      /* ── Page animation ──────────────────────────────────── */
+      .page-enter { animation: fadeIn 200ms ease-out both; }
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(6px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+
+      /* ── Gradient text ───────────────────────────────────── */
+      .grad-text {
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      /* ── Divider ─────────────────────────────────────────── */
+      .divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+
+      /* ── Avatar ──────────────────────────────────────────── */
+      .avatar {
+        display: grid;
+        place-items: center;
+        border-radius: 12px;
+        font-weight: 700;
+        letter-spacing: .02em;
+        background: linear-gradient(135deg, #6366f1, #8b5cf6);
+        color: #fff;
+        flex-shrink: 0;
+      }
+
+      /* ── Toast ───────────────────────────────────────────── */
+      #toast {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        max-width: 360px;
+        z-index: 9999;
+        display: none;
+        border-radius: 14px;
+        padding: 14px 18px;
+        font-size: 13px;
+        box-shadow: var(--shadow-lg);
+        border: 1px solid var(--border);
+        background: var(--surface);
+        animation: slideUp 220ms ease-out;
+      }
+      #toast.toast-success { border-color: #bbf7d0; background: #f0fdf4; }
+      #toast.toast-error   { border-color: #fecaca; background: #fff1f2; }
+      #toast.toast-warn    { border-color: #fde68a; background: #fffbeb; }
+      .dark #toast.toast-success { background: rgba(20,83,45,.25); border-color: #14532d; }
+      .dark #toast.toast-error   { background: rgba(127,29,29,.25); border-color: #7f1d1d; }
+      .dark #toast.toast-warn    { background: rgba(146,64,14,.25); border-color: #92400e; }
+    </style>
+
+    <script>
+      (function() {
+        const key = "theme";
+        const saved = localStorage.getItem(key) || "system";
+        const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        const dark = (saved === "dark") || (saved === "system" && prefersDark);
+        document.documentElement.classList.toggle("dark", dark);
+      })();
+    </script>
+
+    {% block head %}{% endblock %}
+  </head>
+
+  <body class="min-h-screen bg-slate-50 text-slate-900 dark:bg-[#0b1120] dark:text-slate-100 antialiased">
+    {% if not hide_nav %}
+      {% include "partials/topbar.html" %}
+    {% endif %}
+
+    {% set show_sidebar = (not hide_nav) and user and (not hide_sidebar) %}
+
+    <main class="mx-auto w-full max-w-7xl px-4 pb-20 pt-6 md:pt-10 page-enter">
+      <div class="{% if show_sidebar %}grid grid-cols-1 gap-6 md:grid-cols-12{% endif %}">
+        {% if show_sidebar %}
+          <aside class="hidden md:block md:col-span-3 lg:col-span-2">
+            {% include "partials/sidebar.html" %}
+          </aside>
+        {% endif %}
+
+        <section class="min-w-0 {% if show_sidebar %}md:col-span-9 lg:col-span-10{% endif %}">
+          {% block content %}{% endblock %}
+        </section>
+      </div>
+    </main>
+
+    {% if show_sidebar %}
+      <!-- Mobile sidebar drawer -->
+      <div id="mobileSidebar" class="fixed inset-0 z-50 hidden md:hidden" aria-hidden="true">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="window.__toggleSidebar(false)"></div>
+        <div class="absolute left-0 top-0 h-full w-72 max-w-[85vw] overflow-y-auto border-r border-slate-200 bg-white px-4 py-4 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+          {% include "partials/sidebar.html" %}
+        </div>
+      </div>
+    {% endif %}
+
+    <!-- Toast notification -->
+    <div id="toast" role="alert" aria-live="polite">
+      <div class="flex items-start gap-3">
+        <div id="toastIcon" class="mt-0.5 shrink-0"></div>
+        <div class="flex-1 min-w-0">
+          <div class="font-semibold text-sm" id="toastTitle">Notice</div>
+          <div class="mt-0.5 text-slate-600 dark:text-slate-300 text-xs" id="toastMsg"></div>
+        </div>
+        <button class="shrink-0 rounded-lg p-1 hover:bg-black/5 dark:hover:bg-white/10 transition" onclick="window.hideToast()" aria-label="Close">
+          <span data-lucide="x" class="h-4 w-4"></span>
+        </button>
+      </div>
+    </div>
+
+    <script>
+      window.showToast = function(title, msg, type) {
+        const t = document.getElementById("toast");
+        const icon = document.getElementById("toastIcon");
+        document.getElementById("toastTitle").textContent = title || "Notice";
+        document.getElementById("toastMsg").textContent = msg || "";
+        t.className = "";
+        t.style.display = "block";
+        const icons = { success: "check-circle", error: "x-circle", warn: "alert-triangle", info: "info" };
+        const colors = { success: "text-emerald-600", error: "text-red-500", warn: "text-amber-500", info: "text-blue-500" };
+        const cls = { success: "toast-success", error: "toast-error", warn: "toast-warn", info: "" };
+        const t2 = type || "info";
+        if (cls[t2]) t.classList.add(cls[t2]);
+        icon.setAttribute("data-lucide", icons[t2] || "info");
+        icon.className = "mt-0.5 shrink-0 " + (colors[t2] || "text-blue-500");
+        lucide.createIcons();
+        clearTimeout(window.__toastTimer);
+        window.__toastTimer = setTimeout(() => window.hideToast(), 5000);
+      };
+      window.hideToast = function() {
+        const t = document.getElementById("toast");
+        t.style.display = "none";
+      };
+      (function() {
+        try {
+          const p = new URLSearchParams(location.search);
+          const msg = p.get("toast");
+          if (msg) window.showToast("Info", msg, "info");
+        } catch (e) {}
+      })();
+
+      window.__toggleSidebar = function(open) {
+        const el = document.getElementById("mobileSidebar");
+        if (!el) return;
+        if (open === false) {
+          el.classList.add("hidden");
+          el.setAttribute("aria-hidden", "true");
+          return;
+        }
+        const isHidden = el.classList.contains("hidden");
+        el.classList.toggle("hidden", !isHidden);
+        el.setAttribute("aria-hidden", isHidden ? "false" : "true");
+      };
+
+      lucide.createIcons();
+    </script>
+
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

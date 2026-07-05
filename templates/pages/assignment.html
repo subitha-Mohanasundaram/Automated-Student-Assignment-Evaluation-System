@@ -1,0 +1,330 @@
+﻿{% extends "base.html" %}
+{% set can_submit = user and (user.role == "student") and assignment.active %}
+
+{% block head %}
+  <style>
+    /* Simple split-pane with draggable gutter */
+    .split { display:flex; gap:0; min-height: calc(100vh - 160px); }
+    .pane { overflow:auto; }
+    .gutter { width: 10px; cursor: col-resize; position: relative; }
+    .gutter:before { content:""; position:absolute; left:4px; top:0; bottom:0; width:2px; background: rgba(148,163,184,0.45); border-radius: 2px; }
+    .dark .gutter:before { background: rgba(148,163,184,0.25); }
+    .editorWrap { height: 520px; border-radius: 14px; border: 1px solid rgb(226 232 240); overflow:hidden; }
+    .dark .editorWrap { border-color: rgb(30 41 59); }
+    @media (max-width: 1024px) {
+      .split { flex-direction: column; }
+      .gutter { display:none; }
+      .editorWrap { height: 420px; }
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="flex items-start justify-between gap-4">
+    <div>
+      <div class="text-xs text-slate-500 dark:text-slate-400 font-mono">{{ assignment.id }}</div>
+      <h1 class="mt-1 text-2xl font-bold tracking-tight">{{ assignment.title }}</h1>
+      <div class="mt-2 flex flex-wrap items-center gap-2">
+        {% if assignment.difficulty %}
+          {% set d = assignment.difficulty|lower %}
+          {% if "easy" in d %}<span class="badge ok">Easy</span>
+          {% elif "hard" in d %}<span class="badge bad">Hard</span>
+          {% else %}<span class="badge warn">Medium</span>{% endif %}
+        {% endif %}
+        {% for t in tags %}
+          <span class="badge">{{ t }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="hidden md:flex items-center gap-2">
+      <a class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800"
+         href="/leaderboard?assignment_id={{ assignment.id }}">Leaderboard</a>
+    </div>
+  </div>
+
+  <div class="mt-6 split" id="split">
+    <!-- Left: problem -->
+    <section class="pane pr-3" id="leftPane" style="width: {% if can_submit %}48%{% else %}100%{% endif %};">
+      {% if not assignment.active %}
+        <div class="mb-4 card">
+          <div class="flex items-start gap-3">
+            <div class="mt-0.5 text-amber-500" data-lucide="alert-triangle"></div>
+            <div class="text-sm text-slate-700 dark:text-slate-200">
+              <div class="font-semibold">This assignment is not published yet.</div>
+              <div class="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                Status: <span class="badge warn">{{ assignment.generation_status or "inactive" }}</span>
+                {% if assignment.generation_error %}<span class="badge bad">{{ assignment.generation_error }}</span>{% endif %}
+              </div>
+              <div class="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                You can read the problem now. Run/Submit will be enabled after the instructor publishes it.
+              </div>
+            </div>
+          </div>
+        </div>
+      {% endif %}
+
+      <div class="card">
+        <h2 class="text-sm font-semibold text-slate-700 dark:text-slate-200">Problem</h2>
+        <div class="mt-3 space-y-4 text-sm text-slate-700 dark:text-slate-200">
+          <div>
+            <div class="text-xs font-semibold text-slate-500 dark:text-slate-400">Description</div>
+            <div class="mt-1 whitespace-pre-wrap">{{ generated_description or assignment.description }}</div>
+          </div>
+          {% if input_format %}
+            <div>
+              <div class="text-xs font-semibold text-slate-500 dark:text-slate-400">Input Format</div>
+              <div class="mt-1 whitespace-pre-wrap font-mono text-xs">{{ input_format }}</div>
+            </div>
+          {% endif %}
+          {% if output_format %}
+            <div>
+              <div class="text-xs font-semibold text-slate-500 dark:text-slate-400">Output Format</div>
+              <div class="mt-1 whitespace-pre-wrap font-mono text-xs">{{ output_format }}</div>
+            </div>
+          {% endif %}
+          {% if constraints %}
+            <div>
+              <div class="text-xs font-semibold text-slate-500 dark:text-slate-400">Constraints</div>
+              <div class="mt-1 whitespace-pre-wrap font-mono text-xs">{{ constraints }}</div>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if examples and examples|length > 0 %}
+        <div class="mt-4 card">
+          <h2 class="text-sm font-semibold text-slate-700 dark:text-slate-200">Examples</h2>
+          <div class="mt-3 space-y-3">
+            {% for ex in examples[:3] %}
+              <div class="rounded-xl border border-slate-200 bg-white p-3 text-sm dark:border-slate-800 dark:bg-slate-900">
+                <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div>
+                    <div class="text-xs font-semibold text-slate-500 dark:text-slate-400">Input</div>
+                    <pre class="mt-1 whitespace-pre-wrap rounded-lg bg-slate-950 px-3 py-2 text-xs text-slate-100">{{ ex.input }}</pre>
+                  </div>
+                  <div>
+                    <div class="text-xs font-semibold text-slate-500 dark:text-slate-400">Output</div>
+                    <pre class="mt-1 whitespace-pre-wrap rounded-lg bg-slate-950 px-3 py-2 text-xs text-slate-100">{{ ex.output }}</pre>
+                  </div>
+                </div>
+                {% if ex.explanation %}
+                  <div class="mt-2 text-xs text-slate-600 dark:text-slate-300">{{ ex.explanation }}</div>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+
+      <div class="mt-4 card">
+        <div class="flex items-center justify-between">
+          <h2 class="text-sm font-semibold text-slate-700 dark:text-slate-200">Visible Test Cases</h2>
+          <span class="text-xs text-slate-500 dark:text-slate-400">Only visible tests are shown</span>
+        </div>
+        <div class="mt-3 overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="text-left text-xs text-slate-500 dark:text-slate-400">
+              <tr>
+                <th class="py-2">#</th>
+                <th class="py-2">Input</th>
+                <th class="py-2">Expected</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for c in visible_tests[:3] %}
+                <tr class="border-t border-slate-200 dark:border-slate-800">
+                  <td class="py-2 font-mono">{{ loop.index }}</td>
+                  <td class="py-2"><pre class="whitespace-pre-wrap rounded-lg bg-slate-950 px-3 py-2 text-xs text-slate-100">{{ c.input_text }}</pre></td>
+                  <td class="py-2"><pre class="whitespace-pre-wrap rounded-lg bg-slate-950 px-3 py-2 text-xs text-slate-100">{{ c.expected_output }}</pre></td>
+                </tr>
+              {% endfor %}
+              {% if visible_tests|length == 0 %}
+                <tr><td colspan="3" class="py-3 text-slate-500 dark:text-slate-400">No visible tests published.</td></tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+{% if user and user.role != "student" %}
+        <div class="mt-4 card">
+          <div class="flex items-start gap-3">
+            <div class="mt-0.5 text-slate-500 dark:text-slate-400" data-lucide="eye-off"></div>
+            <div class="text-sm text-slate-700 dark:text-slate-200">
+              <div class="font-semibold">Instructor view</div>
+              <div class="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                Coding space is hidden for instructors. Login as a <span class="badge">student</span> to solve and submit solutions.
+              </div>
+            </div>
+          </div>
+        </div>
+      {% endif %}
+    </section>
+
+    {% if can_submit %}
+    <div class="gutter" id="gutter" aria-hidden="true"></div>
+
+    <!-- Right: editor -->
+    <section class="pane pl-3" id="rightPane" style="width: 52%;">
+      <div class="card">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-2">
+            <div class="text-sm font-semibold">Code</div>
+            <span class="badge">Ctrl+Enter submit</span>
+          </div>
+{% if user and user.role != "student" %}
+            <div class="text-xs text-amber-700 dark:text-amber-200">
+              Login as <span class="badge">student</span> to run/submit solutions.
+            </div>
+          {% endif %}
+          <div class="flex flex-wrap items-center gap-2">
+            <label class="text-xs font-semibold text-slate-500 dark:text-slate-400">Language</label>
+            <select id="langSelect"
+                    class="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm dark:border-slate-800 dark:bg-slate-900">
+              {% for l in ["python","java","javascript","c","cpp"] %}
+                <option value="{{ l }}" {% if l == language %}selected{% endif %}>{{ l }}</option>
+              {% endfor %}
+            </select>
+            <button id="resetBtn"
+                    class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800"
+                    type="button">Reset</button>
+            <button id="submitBtn"
+                    class="rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500"
+                    type="button" {% if (not assignment.active) or (not can_submit) %}disabled{% endif %}>Submit</button>
+          </div>
+        </div>
+
+        <form id="codeForm" class="mt-4" action="/editor/submit" method="post">
+          <input type="hidden" name="problem_id" value="{{ assignment.id }}" />
+          <input type="hidden" name="language" id="langField" value="{{ language }}" />
+          <input type="hidden" name="intent" id="intentField" value="submit" />
+          <input type="hidden" name="code" id="codeField" value="" />
+          <div class="editorWrap" id="editor"></div>
+        </form>
+
+        <div class="mt-4 rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+          Submitting runs visible + hidden + stress tests in the sandbox. You will be redirected to the evaluation status page.
+          {% if not assignment.active %}
+            <div class="mt-2 text-xs text-amber-700 dark:text-amber-200">
+              Not published: Run/Submit disabled.
+            </div>
+          {% endif %}
+{% if user and user.role != "student" %}
+            <div class="mt-2 text-xs text-amber-700 dark:text-amber-200">
+              Not a student: Run/Submit disabled.
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </section>
+    {% endif %}
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {% if can_submit %}
+  <script>
+    // Split pane sizing persistence (desktop only)
+    (function() {
+      const split = document.getElementById("split");
+      const left = document.getElementById("leftPane");
+      const right = document.getElementById("rightPane");
+      const gutter = document.getElementById("gutter");
+      if (!split || !left || !right || !gutter) return;
+      const key = "split:" + {{ assignment.id|tojson }};
+      const saved = localStorage.getItem(key);
+      if (saved && window.innerWidth > 1024) {
+        const pct = Math.min(70, Math.max(25, parseFloat(saved)));
+        left.style.width = pct + "%";
+        right.style.width = (100 - pct) + "%";
+      }
+      let dragging = false;
+      gutter.addEventListener("mousedown", (e) => { dragging = true; document.body.style.userSelect = "none"; });
+      window.addEventListener("mouseup", () => { if (!dragging) return; dragging = false; document.body.style.userSelect = ""; });
+      window.addEventListener("mousemove", (e) => {
+        if (!dragging || window.innerWidth <= 1024) return;
+        const rect = split.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const pct = Math.min(70, Math.max(25, (x / rect.width) * 100));
+        left.style.width = pct + "%";
+        right.style.width = (100 - pct) + "%";
+        localStorage.setItem(key, String(pct));
+      });
+    })();
+  </script>
+
+  <!-- Monaco Editor (CDN) -->
+  <script>
+    const STARTERS = {{ starters|tojson }};
+    function loadMonaco(cb) {
+      if (window.monaco) return cb();
+      const s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js";
+      s.onload = () => {
+        require.config({ paths: { vs: "https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs" }});
+        require(["vs/editor/editor.main"], cb);
+      };
+      document.head.appendChild(s);
+    }
+
+    (function() {
+      const langSelect = document.getElementById("langSelect");
+      const langField = document.getElementById("langField");
+      const codeField = document.getElementById("codeField");
+      const intentField = document.getElementById("intentField");
+      const form = document.getElementById("codeForm");
+      const resetBtn = document.getElementById("resetBtn");
+      const submitBtn = document.getElementById("submitBtn");
+
+      let editor = null;
+      function currentLang() { return (langSelect && langSelect.value) ? langSelect.value : "python"; }
+      function starterFor(lang) { return STARTERS[lang] || STARTERS["python"] || ""; }
+
+      loadMonaco(() => {
+        editor = monaco.editor.create(document.getElementById("editor"), {
+          value: {{ code|tojson }},
+          language: currentLang() === "cpp" ? "cpp" : currentLang(),
+          theme: document.documentElement.classList.contains("dark") ? "vs-dark" : "vs",
+          minimap: { enabled: false },
+          fontSize: 13,
+          automaticLayout: true
+        });
+        // Update theme on toggle
+        const obs = new MutationObserver(() => {
+          monaco.editor.setTheme(document.documentElement.classList.contains("dark") ? "vs-dark" : "vs");
+        });
+        obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+      });
+
+      function submit(intent) {
+        if (!editor) return;
+        if (intent === "submit" && submitBtn && submitBtn.disabled) return;
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.textContent = "Submitting...";
+        }
+        langField.value = currentLang();
+        intentField.value = "submit";
+        codeField.value = editor.getValue();
+        form.submit();
+      }
+
+      if (langSelect) {
+        langSelect.addEventListener("change", () => {
+          if (!editor) return;
+          const l = currentLang();
+          const ml = (l === "cpp") ? "cpp" : l;
+          monaco.editor.setModelLanguage(editor.getModel(), ml);
+        });
+      }
+      if (resetBtn) resetBtn.addEventListener("click", () => { if (editor) editor.setValue(starterFor(currentLang())); });
+      if (submitBtn) submitBtn.addEventListener("click", () => submit("submit"));
+
+      window.addEventListener("keydown", (e) => {
+        if (!editor) return;
+        if (e.ctrlKey && e.key === "Enter") { e.preventDefault(); submit("submit"); }
+      });
+    })();
+  </script>
+  {% endif %}
+{% endblock %}

@@ -1,0 +1,68 @@
+{% extends "layout_auth.html" %}
+
+{% set hide_nav = true %}
+{% set auth_title = title %}
+{% set auth_subtitle = subtitle %}
+
+{% block auth_content %}
+  <div>
+    <!-- Header -->
+    <div class="mb-6 flex items-center justify-between gap-3 border-b border-slate-100 pb-5 dark:border-slate-800">
+      <div>
+        <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">{{ title }}</div>
+        <div class="mt-1 text-xl font-extrabold tracking-tight text-slate-900 dark:text-white">{{ subtitle or "Sign in to continue" }}</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <a href="/login"
+           class="btn btn-secondary btn-sm">
+          <span data-lucide="door-open" class="h-3.5 w-3.5"></span>
+          Portal
+        </a>
+        <a href="/"
+           class="btn btn-secondary btn-sm">
+          <span data-lucide="home" class="h-3.5 w-3.5"></span>
+          Home
+        </a>
+      </div>
+    </div>
+
+    {% if error %}
+      <div class="mb-5 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3.5 dark:border-red-800/40 dark:bg-red-900/20">
+        <span data-lucide="alert-circle" class="h-4 w-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5"></span>
+        <p class="text-sm text-red-700 dark:text-red-300 font-medium">{{ error }}</p>
+      </div>
+    {% endif %}
+
+    <form class="space-y-4" action="{{ action }}" method="post">
+      {% for field in fields %}
+        <div>
+          <label class="form-label" for="field_{{ field.name }}">{{ field.label }}</label>
+          <input
+            id="field_{{ field.name }}"
+            class="form-input"
+            name="{{ field.name }}"
+            placeholder="{{ field.placeholder }}"
+            {% if field.type %}type="{{ field.type }}"{% endif %}
+            {% if field.required %}required{% endif %}
+            autocomplete="on"
+          />
+        </div>
+      {% endfor %}
+
+      <button
+        class="btn btn-primary btn-lg w-full mt-2 justify-center"
+        type="submit"
+        id="loginSubmitBtn"
+      >
+        <span data-lucide="log-in" class="h-4 w-4"></span>
+        {{ button_text }}
+      </button>
+    </form>
+
+    {% if footer_html %}
+      <div class="mt-5 border-t border-slate-100 pt-4 text-center text-[13px] text-slate-500 dark:border-slate-800 dark:text-slate-400">
+        {{ footer_html | safe }}
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}

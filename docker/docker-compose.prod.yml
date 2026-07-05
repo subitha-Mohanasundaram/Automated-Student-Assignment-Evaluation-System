@@ -1,0 +1,28 @@
+services:
+  dashboard:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+    environment:
+      - PRODUCTION=1
+      - SANDBOX_MODE=docker
+      - GRADER_DOCKER_IMAGE=assignment-grader:latest
+    ports:
+      - "8080:8080"
+    # For Linux deployments: allow the service to spawn sandbox containers via the host Docker daemon.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  mcp:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.mcp
+    environment:
+      - PRODUCTION=1
+      - SANDBOX_MODE=docker
+      - GRADER_DOCKER_IMAGE=assignment-grader:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+

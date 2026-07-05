@@ -1,0 +1,40 @@
+{
+  "student_name": "Subitha",
+  "problem_id": "add_numbers",
+  "language": "java",
+  "total_test_cases": 7,
+  "passed_cases": 7,
+  "visible": {
+    "passed": 4,
+    "total": 4,
+    "weight": 0.6,
+    "score_percent": 100.0,
+    "weighted_contribution": 60.0
+  },
+  "hidden": {
+    "passed": 3,
+    "total": 3,
+    "weight": 0.4,
+    "score_percent": 100.0,
+    "weighted_contribution": 40.0
+  },
+  "anti_cheat": {
+    "passed": true,
+    "violations": []
+  },
+  "plagiarism": {
+    "detected": true,
+    "matches": [
+      "new-unmapped-user: submissions\\new-unmapped-user\\student_solution.java (exact fingerprint match)",
+      "temp-user: submissions\\temp-user\\student_solution.java (exact fingerprint match)",
+      "unknown-user: submissions\\unknown-user\\student_solution.java (exact fingerprint match)"
+    ],
+    "risk_score": 100.0,
+    "evidence": [
+      "Exact normalized fingerprint match with new-unmapped-user",
+      "Exact normalized fingerprint match with temp-user",
+      "Exact normalized fingerprint match with unknown-user"
+    ]
+  },
+  "score": 70.0
+}

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import shutil
+import uuid
 from pathlib import Path
 
 import pytest
@@ -38,3 +40,17 @@ def student_module(request: pytest.FixtureRequest):
         pytest.fail(f"Error while importing student file: {exc}")
 
     return module
+
+
+@pytest.fixture
+def tmp_path() -> Path:
+    # Windows in this environment blocks pytest's default temp dirs (names like "pytest-*")
+    # and also blocks the user temp directory, so we provide a workspace-local alternative.
+    root = Path("sandbox_tmp") / "tmp_test_dirs"
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / f"tmp_{uuid.uuid4().hex}"
+    path.mkdir(parents=True, exist_ok=False)
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)

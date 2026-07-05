@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <div class="flex items-start justify-between gap-4">
+    <div>
+      <div class="text-xs text-slate-500 dark:text-slate-400 font-mono">submission #{{ submission.id }}</div>
+      <h1 class="mt-1 text-2xl font-bold tracking-tight">Student Submission</h1>
+      <div class="mt-2 flex flex-wrap items-center gap-2 text-sm">
+        <span class="badge">{{ submission.problem_id }}</span>
+        <span class="badge">{{ submission.language }}</span>
+        <span class="badge">{{ submission.username }}</span>
+        {% if submission.phone %}<span class="badge">{{ submission.phone }}</span>{% endif %}
+      </div>
+      <div class="mt-2 text-xs text-slate-500 dark:text-slate-400 font-mono">{{ submission.path }}</div>
+    </div>
+    <div class="flex items-center gap-2">
+      <a href="/instructor/assignment?id={{ submission.problem_id }}"
+         class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800">Back</a>
+    </div>
+  </div>
+
+  <div class="mt-6 card">
+    <div class="text-sm font-semibold">Code</div>
+    <pre class="mt-3 whitespace-pre-wrap rounded-xl bg-slate-950 px-4 py-3 text-xs text-slate-100 overflow-auto">{{ code }}</pre>
+  </div>
+{% endblock %}
+

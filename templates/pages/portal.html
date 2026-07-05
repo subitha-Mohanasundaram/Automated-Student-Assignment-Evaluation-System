@@ -1,0 +1,58 @@
+{% extends "layout_auth.html" %}
+
+{% set hide_nav = true %}
+{% set auth_title = "Choose Your Portal" %}
+{% set auth_subtitle = "Pick how you'd like to access the platform." %}
+
+{% block auth_content %}
+  <div>
+    <!-- Header -->
+    <div class="mb-6 border-b border-slate-100 pb-5 dark:border-slate-800">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Portal Selection</div>
+          <h1 class="mt-1 text-xl font-extrabold tracking-tight text-slate-900 dark:text-white">Student or Instructor?</h1>
+        </div>
+        <a href="/" class="btn btn-secondary btn-sm">
+          <span data-lucide="home" class="h-3.5 w-3.5"></span> Home
+        </a>
+      </div>
+    </div>
+
+    <!-- Role cards -->
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <a href="/login?mode=student"
+         class="group relative overflow-hidden rounded-2xl border-2 border-transparent bg-gradient-to-br from-indigo-50 to-violet-50 p-5 hover:border-brand-300 hover:shadow-lg hover:shadow-brand-500/10 transition-all duration-200 dark:from-indigo-900/20 dark:to-violet-900/20 dark:hover:border-brand-600 hover:-translate-y-0.5">
+        <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-lg shadow-indigo-500/30 mb-4">
+          <span data-lucide="graduation-cap" class="h-6 w-6 text-white"></span>
+        </div>
+        <div class="font-bold text-[15px] text-slate-900 dark:text-white">Student</div>
+        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Solve assignments and track your score.</div>
+        <div class="mt-4 flex items-center gap-1 text-xs font-bold text-brand-600 dark:text-brand-400">
+          Enter <span data-lucide="arrow-right" class="h-3.5 w-3.5 transition-transform group-hover:translate-x-1"></span>
+        </div>
+      </a>
+
+      <a href="/login?mode=instructor"
+         class="group relative overflow-hidden rounded-2xl border-2 border-transparent bg-gradient-to-br from-sky-50 to-cyan-50 p-5 hover:border-sky-300 hover:shadow-lg hover:shadow-sky-500/10 transition-all duration-200 dark:from-sky-900/20 dark:to-cyan-900/20 dark:hover:border-sky-600 hover:-translate-y-0.5">
+        <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-500 to-cyan-600 shadow-lg shadow-sky-500/30 mb-4">
+          <span data-lucide="badge-check" class="h-6 w-6 text-white"></span>
+        </div>
+        <div class="font-bold text-[15px] text-slate-900 dark:text-white">Instructor</div>
+        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Create assignments and review submissions.</div>
+        <div class="mt-4 flex items-center gap-1 text-xs font-bold text-sky-600 dark:text-sky-400">
+          Enter <span data-lucide="arrow-right" class="h-3.5 w-3.5 transition-transform group-hover:translate-x-1"></span>
+        </div>
+      </a>
+    </div>
+
+    <!-- Demo warning -->
+    <div class="mt-5 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800/40 dark:bg-amber-900/20">
+      <span data-lucide="alert-triangle" class="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5"></span>
+      <p class="text-xs text-amber-700 dark:text-amber-300">
+        Demo login is not production-secure. Disable by unsetting
+        <code class="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-[10px] dark:bg-amber-900/40">DEMO_AUTH</code>.
+      </p>
+    </div>
+  </div>
+{% endblock %}

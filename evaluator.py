@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import os
 import json
 import re
 import shutil
@@ -14,6 +15,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -31,6 +33,7 @@ class TestSummary:
     plagiarism_matches: list[str] | None = None
     plagiarism_risk_score: float = 0.0
     plagiarism_evidence: list[str] | None = None
+    case_results: list[dict[str, object]] | None = None
     visible_weight: float = 0.6
     hidden_weight: float = 0.4
     visible_score_percent: float = 0.0
@@ -52,17 +55,229 @@ class ProblemConfig:
     anti_cheat: dict[str, object]
 
 
+@dataclass
+class IOCaseResult:
+    visibility: str
+    input: str
+    expected: str
+    actual: str
+    passed: bool
+    weight: float = 1.0
+    error: str | None = None
+
+
+def _normalize_output(text: str) -> str:
+    # Normalize common platform differences and trailing whitespace.
+    return (text or "").replace("\r\n", "\n").strip()
+
+
+def _detect_language_from_path(path: Path) -> str:
+    ext = path.suffix.lower()
+    if ext == ".py":
+        return "python"
+    if ext == ".java":
+        return "java"
+    if ext == ".js":
+        return "javascript"
+    if ext == ".c":
+        return "c"
+    return "cpp"
+
+
+def _compile_and_prepare_io(*, language: str, student_file: Path, temp_dir: Path) -> tuple[list[str], Path | None]:
+    """Returns (run_cmd, working_dir) where run_cmd is executed with stdin per case.
+
+    For compiled languages, compiles to temp_dir and returns executable run cmd.
+    """
+    lang = language.lower().strip()
+    if lang == "python":
+        submission = temp_dir / "submission.py"
+        submission.write_text(student_file.read_text(encoding="utf-8", errors="replace").lstrip("\ufeff"), encoding="utf-8")
+        return ["python", str(submission.name)], temp_dir
+    if lang == "javascript":
+        submission = temp_dir / "submission.js"
+        submission.write_text(student_file.read_text(encoding="utf-8", errors="replace").lstrip("\ufeff"), encoding="utf-8")
+        return ["node", str(submission.name)], temp_dir
+    if lang == "java":
+        if shutil.which("javac") is None or shutil.which("java") is None:
+            raise RuntimeError("Java runtime tools not found (javac/java).")
+        source = student_file.read_text(encoding="utf-8", errors="replace").lstrip("\ufeff")
+        class_name = _extract_java_public_class_name(source)
+        submission = temp_dir / f"{class_name}.java"
+        submission.write_text(source, encoding="utf-8")
+        cp = subprocess.run(["javac", submission.name], cwd=temp_dir, capture_output=True, text=True, check=False, timeout=60)
+        if cp.returncode != 0:
+            raise RuntimeError(f"Java compile failed: {cp.stderr or cp.stdout}")
+        return ["java", "-cp", str(temp_dir), class_name], temp_dir
+    if lang == "c":
+        if shutil.which("gcc") is None:
+            raise RuntimeError("C compiler not found (gcc).")
+        submission = temp_dir / "submission.c"
+        submission.write_text(student_file.read_text(encoding="utf-8", errors="replace").lstrip("\ufeff"), encoding="utf-8")
+        exe = temp_dir / "a.out"
+        cp = subprocess.run(
+            ["gcc", "-O2", "-std=c11", submission.name, "-o", str(exe.name)],
+            cwd=temp_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+        if cp.returncode != 0:
+            raise RuntimeError(f"C compile failed: {cp.stderr or cp.stdout}")
+        return [str(exe)], temp_dir
+    # cpp
+    if shutil.which("g++") is None:
+        raise RuntimeError("C++ compiler not found (g++).")
+    submission = temp_dir / "submission.cpp"
+    submission.write_text(student_file.read_text(encoding="utf-8", errors="replace").lstrip("\ufeff"), encoding="utf-8")
+    exe = temp_dir / "a.out"
+    cp = subprocess.run(
+        ["g++", "-std=c++17", "-O2", submission.name, "-o", str(exe.name)],
+        cwd=temp_dir,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=90,
+    )
+    if cp.returncode != 0:
+        raise RuntimeError(f"C++ compile failed: {cp.stderr or cp.stdout}")
+    return [str(exe)], temp_dir
+
+
+def _evaluate_io_cases(*, language: str, student_file: Path, cases: list[Any]) -> TestSummary:
+    """Evaluate stdin->stdout test cases (coding interview style).
+
+    cases must be a list of assignment_intel.testcases.IOTestCase objects.
+    """
+    # Import lazily to avoid evaluator being used standalone without the platform package.
+    from assignment_intel.testcases import IOTestCase  # type: ignore
+
+    typed_cases: list[IOTestCase] = [c for c in cases if isinstance(c, IOTestCase)]
+    if not typed_cases:
+        raise RuntimeError("No IO test cases provided.")
+
+    temp_dir = Path(tempfile.mkdtemp(prefix="io_eval_"))
+    per_case: list[IOCaseResult] = []
+    try:
+        run_cmd, cwd = _compile_and_prepare_io(language=language, student_file=student_file, temp_dir=temp_dir)
+
+        # Suite scoring with required weights: visible 30%, hidden 50%, stress 20%.
+        visible_total = 0
+        visible_passed = 0
+        hidden_total = 0
+        hidden_passed = 0
+        stress_total = 0
+        stress_passed = 0
+
+        for c in typed_cases:
+            vis = str(c.visibility or "visible").strip().lower()
+            if vis not in {"visible", "hidden", "stress"}:
+                vis = "visible"
+            if vis == "visible":
+                visible_total += 1
+            elif vis == "hidden":
+                hidden_total += 1
+            else:
+                stress_total += 1
+
+            try:
+                cp = subprocess.run(
+                    run_cmd,
+                    cwd=cwd,
+                    input=c.input_text,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                actual = _normalize_output(cp.stdout or "")
+                expected = _normalize_output(c.expected_output)
+                ok = (cp.returncode == 0) and (actual == expected)
+                if ok:
+                    if vis == "visible":
+                        visible_passed += 1
+                    elif vis == "hidden":
+                        hidden_passed += 1
+                    else:
+                        stress_passed += 1
+                per_case.append(
+                    IOCaseResult(
+                        visibility=vis,
+                        # Never reveal hidden/stress inputs/expected in student-facing reports.
+                        input=c.input_text if vis == "visible" else "",
+                        expected=c.expected_output if vis == "visible" else "",
+                        actual=(cp.stdout or "") if vis == "visible" else "",
+                        passed=ok,
+                        weight=float(c.weight),
+                        error=None if ok else (cp.stderr or "").strip() or (f"exit_code={cp.returncode}" if cp.returncode != 0 else "wrong_answer"),
+                    )
+                )
+            except subprocess.TimeoutExpired:
+                per_case.append(
+                    IOCaseResult(
+                        visibility=vis,
+                        input=c.input_text,
+                        expected=c.expected_output,
+                        actual="",
+                        passed=False,
+                        weight=float(c.weight),
+                        error="timeout",
+                    )
+                )
+
+        total = len(typed_cases)
+        passed = visible_passed + hidden_passed + stress_passed
+        visible_score_percent = round((visible_passed / visible_total) * 100.0, 2) if visible_total else 0.0
+        hidden_score_percent = round((hidden_passed / hidden_total) * 100.0, 2) if hidden_total else 0.0
+        stress_score_percent = round((stress_passed / stress_total) * 100.0, 2) if stress_total else 0.0
+        visible_weight = 0.3
+        hidden_weight = 0.5
+        stress_weight = 0.2
+        weighted_visible_contribution = round(visible_score_percent * visible_weight, 2)
+        weighted_hidden_contribution = round(hidden_score_percent * hidden_weight, 2)
+        weighted_stress_contribution = round(stress_score_percent * stress_weight, 2)
+        score_percent = round(weighted_visible_contribution + weighted_hidden_contribution + weighted_stress_contribution, 2)
+
+        # Store per-case results in the evidence fields so it appears in JSON output under plagiarism_evidence for now.
+        # (Keeps backwards compatibility with the current JSON schema writer.)
+        return TestSummary(
+            total=total,
+            passed=passed,
+            score=score_percent,
+            visible_total=visible_total,
+            visible_passed=visible_passed,
+            hidden_total=hidden_total,
+            hidden_passed=hidden_passed,
+            # overload hidden_* fields are already in the schema; stress is added via case_results only for now.
+            visible_weight=visible_weight,
+            hidden_weight=hidden_weight,
+            visible_score_percent=visible_score_percent,
+            hidden_score_percent=hidden_score_percent,
+            weighted_visible_contribution=weighted_visible_contribution,
+            weighted_hidden_contribution=weighted_hidden_contribution,
+            case_results=[c.__dict__ for c in per_case][:500],
+        )
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate a student submission using predefined test packs.")
     parser.add_argument("student_file", help="Path to the student's code file (.py or .java)")
     parser.add_argument("--student-name", dest="student_name", help="Student name (default: inferred username/filename)")
     parser.add_argument("--result-file", default="result.txt", help="Output result file path")
     parser.add_argument("--problem-id", default=None, help="Problem id (default: inferred from path or add_numbers)")
+    parser.add_argument(
+        "--extra-hidden-cases",
+        default=None,
+        help="Optional JSON file containing additional hidden test cases (contract-style problems only).",
+    )
     return parser.parse_args()
 
 
 def _is_supported_submission(student_file: Path) -> bool:
-    return student_file.suffix.lower() in {".py", ".java"}
+    return student_file.suffix.lower() in {".py", ".java", ".js", ".cpp", ".cc", ".cxx", ".c"}
 
 
 def _get_repo_root() -> Path:
@@ -106,6 +321,39 @@ def _load_problem_config(problem_id: str) -> ProblemConfig:
         java_visible_cases=raw["java"]["visible_cases"],
         java_hidden_cases=raw["java"]["hidden_cases"],
         anti_cheat=raw.get("anti_cheat", {}),
+    )
+
+
+def _merge_extra_hidden_cases(config: ProblemConfig, extra_hidden_cases_path: Path) -> ProblemConfig:
+    """Append additional hidden cases from a generator output JSON file.
+
+    Expected format:
+      { "problem_id": "...", "cases": [[...], ...] }
+    """
+    try:
+        raw = json.loads(extra_hidden_cases_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Invalid extra hidden cases file: {extra_hidden_cases_path} ({exc})")
+    cases = raw.get("cases")
+    if not isinstance(cases, list):
+        raise RuntimeError("Extra hidden cases file missing 'cases' list")
+    extra: list[list[object]] = []
+    for item in cases:
+        if isinstance(item, list):
+            extra.append(item)
+    if not extra:
+        return config
+
+    return ProblemConfig(
+        problem_id=config.problem_id,
+        default_language=config.default_language,
+        scoring=config.scoring,
+        python_visible_test=config.python_visible_test,
+        python_hidden_test=config.python_hidden_test,
+        java_contract=config.java_contract,
+        java_visible_cases=config.java_visible_cases,
+        java_hidden_cases=[*config.java_hidden_cases, *extra],
+        anti_cheat=config.anti_cheat,
     )
 
 
@@ -173,6 +421,7 @@ def _write_result(
     plagiarism_status = "DETECTED" if summary.plagiarism_detected else "NOT_DETECTED"
     matches = summary.plagiarism_matches or []
     evidence = summary.plagiarism_evidence or []
+    case_results = summary.case_results or []
 
     content = (
         f"Student Name: {student_name}\n"
@@ -205,6 +454,16 @@ def _write_result(
         content += "Plagiarism Evidence:\n"
         for item in evidence:
             content += f"- {item}\n"
+    if case_results:
+        content += "Test Case Results:\n"
+        for item in case_results[:50]:
+            try:
+                vis = item.get("visibility")
+                passed = item.get("passed")
+                err = item.get("error")
+                content += f"- {vis} passed={passed} error={err}\n"
+            except Exception:
+                continue
     result_file.write_text(content, encoding="utf-8")
 
 
@@ -245,6 +504,7 @@ def _write_result_json(
             "risk_score": summary.plagiarism_risk_score,
             "evidence": summary.plagiarism_evidence or [],
         },
+        "case_results": summary.case_results or [],
         "score": summary.score,
     }
     json_path = result_file.with_suffix(".json")
@@ -277,7 +537,8 @@ def _run_python_anti_cheat(student_file: Path, anti_cheat_cfg: dict[str, object]
     disallowed_nodes = set(python_cfg.get("disallowed_ast_nodes", []))
     violations: list[str] = []
 
-    source = student_file.read_text(encoding="utf-8")
+    source = student_file.read_text(encoding="utf-8", errors="replace")
+    source = source.lstrip("\ufeff")
     tree = ast.parse(source, filename=str(student_file))
 
     for node in ast.walk(tree):
@@ -317,11 +578,49 @@ def _run_java_anti_cheat(student_file: Path, anti_cheat_cfg: dict[str, object] |
         r"\bjava\.nio\.file\b",
     ]
     disallowed_patterns.extend(list(java_cfg.get("disallowed_patterns", [])))
-    source = student_file.read_text(encoding="utf-8")
+    source = student_file.read_text(encoding="utf-8", errors="replace")
+    source = source.lstrip("\ufeff")
     violations: list[str] = []
     for pattern in disallowed_patterns:
         if re.search(pattern, source):
             violations.append(f"Disallowed Java usage matched pattern: {pattern}")
+    return violations
+
+
+def _run_javascript_anti_cheat(student_file: Path, anti_cheat_cfg: dict[str, object] | None = None) -> list[str]:
+    cfg = anti_cheat_cfg or {}
+    js_cfg = cfg.get("javascript", {}) if isinstance(cfg, dict) else {}
+    disallowed_patterns = [
+        r"\brequire\s*\(\s*['\"]fs['\"]\s*\)",
+        r"\brequire\s*\(\s*['\"]child_process['\"]\s*\)",
+        r"\brequire\s*\(\s*['\"]net['\"]\s*\)",
+        r"\brequire\s*\(\s*['\"]http['\"]\s*\)",
+        r"\bprocess\s*\.\s*exit\b",
+    ]
+    disallowed_patterns.extend(list(js_cfg.get("disallowed_patterns", [])))
+    source = student_file.read_text(encoding="utf-8", errors="replace").lstrip("\ufeff")
+    violations: list[str] = []
+    for pattern in disallowed_patterns:
+        if re.search(pattern, source):
+            violations.append(f"Disallowed JS usage matched pattern: {pattern}")
+    return violations
+
+
+def _run_cpp_anti_cheat(student_file: Path, anti_cheat_cfg: dict[str, object] | None = None) -> list[str]:
+    cfg = anti_cheat_cfg or {}
+    cpp_cfg = cfg.get("cpp", {}) if isinstance(cfg, dict) else {}
+    disallowed_patterns = [
+        r"\bstd::filesystem\b",
+        r"#\s*include\s*<filesystem>",
+        r"\bsystem\s*\(",
+        r"\bfork\s*\(",
+    ]
+    disallowed_patterns.extend(list(cpp_cfg.get("disallowed_patterns", [])))
+    source = student_file.read_text(encoding="utf-8", errors="replace").lstrip("\ufeff")
+    violations: list[str] = []
+    for pattern in disallowed_patterns:
+        if re.search(pattern, source):
+            violations.append(f"Disallowed C++ usage matched pattern: {pattern}")
     return violations
 
 
@@ -331,12 +630,19 @@ def _normalize_source_for_fingerprint(source: str, language: str) -> str:
     elif language == "java":
         source = re.sub(r"//.*", "", source)
         source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
+    elif language in {"cpp", "c"}:
+        source = re.sub(r"//.*", "", source)
+        source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
+    elif language == "javascript":
+        source = re.sub(r"//.*", "", source)
+        source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
     source = re.sub(r"\s+", "", source)
     return source.lower()
 
 
 def _compute_fingerprint(student_file: Path, language: str) -> str:
-    source = student_file.read_text(encoding="utf-8")
+    source = student_file.read_text(encoding="utf-8", errors="replace")
+    source = source.lstrip("\ufeff")
     normalized = _normalize_source_for_fingerprint(source, language)
     import hashlib
 
@@ -347,6 +653,9 @@ def _tokenize_source(source: str, language: str) -> list[str]:
     if language == "python":
         source = re.sub(r"#.*", "", source)
     elif language == "java":
+        source = re.sub(r"//.*", "", source)
+        source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
+    elif language in {"c", "cpp", "javascript"}:
         source = re.sub(r"//.*", "", source)
         source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
     return re.findall(r"[A-Za-z_]\w*|\d+|==|!=|<=|>=|[{}()[\],.;:+\-*/%]", source)
@@ -741,6 +1050,376 @@ public class JavaEvaluatorHarness {{
     )
 
 
+def _js_expected_string(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _evaluate_javascript_cases(student_file: Path, method_name: str, cases: list[list[object]], mode: str | None) -> tuple[int, int]:
+    if shutil.which("node") is None:
+        raise RuntimeError("Node.js runtime not found (node).")
+
+    passed = 0
+    total = 0
+    temp_dir = Path(tempfile.mkdtemp(prefix="js_eval_"))
+    try:
+        harness = temp_dir / "harness.js"
+        harness.write_text(
+            "\n".join(
+                [
+                    "const submissionPath = process.argv[2];",
+                    "const funcName = process.argv[3];",
+                    "const argsJson = process.argv[4];",
+                    "let mod;",
+                    "try { mod = require(submissionPath); } catch (e) { console.error('IMPORT_ERROR:' + e.toString()); process.exit(2); }",
+                    "const fn = mod[funcName] || mod.default || mod;",
+                    "if (typeof fn !== 'function') { console.error('MISSING_FUNCTION:' + funcName); process.exit(3); }",
+                    "let args;",
+                    "try { args = JSON.parse(argsJson); } catch (e) { console.error('BAD_ARGS'); process.exit(4); }",
+                    "try {",
+                    "  const out = fn.apply(null, args);",
+                    "  if (out === undefined) { console.log(''); } else { console.log(String(out)); }",
+                    "} catch (e) { console.error('RUNTIME_ERROR:' + e.toString()); process.exit(5); }",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        submission_abs = str(student_file.resolve())
+        for row in cases:
+            total += 1
+            if mode == "string_unary":
+                inp = _js_expected_string(row[0])
+                expected = _js_expected_string(row[1])
+                args = [inp]
+            else:
+                a = row[0]
+                b = row[1]
+                expected = row[2]
+                args = [a, b]
+            cp = subprocess.run(
+                ["node", str(harness), submission_abs, method_name, json.dumps(args)],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+            if cp.returncode != 0:
+                continue
+            actual = (cp.stdout or "").strip()
+            if mode == "string_unary":
+                if actual == expected.strip():
+                    passed += 1
+            else:
+                try:
+                    actual_f = float(actual)
+                    expected_f = float(expected)  # type: ignore[arg-type]
+                except ValueError:
+                    continue
+                if abs(actual_f - expected_f) <= 1e-9:
+                    passed += 1
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+    return passed, total
+
+
+def _evaluate_javascript(student_file: Path, config: ProblemConfig) -> TestSummary:
+    contract = config.java_contract or {}
+    method_name = str(contract.get("method_name") or "solve")
+    mode = contract.get("mode") if isinstance(contract.get("mode"), str) else None
+    visible_passed, visible_total = _evaluate_javascript_cases(student_file, method_name, config.java_visible_cases, mode)
+    hidden_passed, hidden_total = _evaluate_javascript_cases(student_file, method_name, config.java_hidden_cases, mode)
+
+    total = visible_total + hidden_total
+    passed = visible_passed + hidden_passed
+    (
+        score,
+        visible_weight,
+        hidden_weight,
+        visible_score_percent,
+        hidden_score_percent,
+        weighted_visible_contribution,
+        weighted_hidden_contribution,
+    ) = _weighted_score(visible_passed, visible_total, hidden_passed, hidden_total, config.scoring)
+    return TestSummary(
+        total=total,
+        passed=passed,
+        score=score,
+        visible_total=visible_total,
+        visible_passed=visible_passed,
+        hidden_total=hidden_total,
+        hidden_passed=hidden_passed,
+        visible_weight=visible_weight,
+        hidden_weight=hidden_weight,
+        visible_score_percent=visible_score_percent,
+        hidden_score_percent=hidden_score_percent,
+        weighted_visible_contribution=weighted_visible_contribution,
+        weighted_hidden_contribution=weighted_hidden_contribution,
+    )
+
+
+def _evaluate_cpp_cases(student_file: Path, function_name: str, cases: list[list[object]], mode: str | None) -> tuple[int, int]:
+    if shutil.which("g++") is None:
+        raise RuntimeError("C++ compiler not found (g++).")
+
+    passed = 0
+    total = 0
+    temp_dir = Path(tempfile.mkdtemp(prefix="cpp_eval_"))
+    try:
+        submission_name = "submission.cpp"
+        submission_cpp = temp_dir / submission_name
+        submission_cpp.write_text(student_file.read_text(encoding="utf-8", errors="replace").lstrip("\ufeff"), encoding="utf-8")
+
+        harness_cpp = temp_dir / "harness.cpp"
+        if mode == "string_unary":
+            harness_cpp.write_text(
+                "\n".join(
+                    [
+                        "#include <iostream>",
+                        "#include <string>",
+                        f"#include \"{submission_name}\"",
+                        "int main() {",
+                        "  std::string input;",
+                        "  std::getline(std::cin, input);",
+                        f"  std::string out = {function_name}(input);",
+                        "  std::cout << out;",
+                        "  return 0;",
+                        "}",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+        else:
+            harness_cpp.write_text(
+                "\n".join(
+                    [
+                        "#include <iostream>",
+                        f"#include \"{submission_name}\"",
+                        "int main() {",
+                        "  double a, b;",
+                        "  if (!(std::cin >> a >> b)) return 1;",
+                        f"  auto out = {function_name}(a, b);",
+                        "  std::cout << out;",
+                        "  return 0;",
+                        "}",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+        exe_path = temp_dir / ("run.exe" if os.name == "nt" else "run")
+        cp = subprocess.run(
+            ["g++", "-std=c++17", "-O2", str(harness_cpp), "-o", str(exe_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=20,
+        )
+        if cp.returncode != 0:
+            raise RuntimeError(f"C++ compile failed: {cp.stderr.strip()}")
+
+        for row in cases:
+            total += 1
+            if mode == "string_unary":
+                inp = _js_expected_string(row[0])
+                expected = _js_expected_string(row[1])
+                stdin_data = inp
+            else:
+                a = row[0]
+                b = row[1]
+                expected = row[2]
+                stdin_data = f"{a} {b}"
+            cp2 = subprocess.run(
+                [str(exe_path)],
+                input=stdin_data,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+            if cp2.returncode != 0:
+                continue
+            actual = (cp2.stdout or "").strip()
+            if mode == "string_unary":
+                if actual == expected.strip():
+                    passed += 1
+            else:
+                try:
+                    actual_f = float(actual)
+                    expected_f = float(expected)  # type: ignore[arg-type]
+                except ValueError:
+                    continue
+                if abs(actual_f - expected_f) <= 1e-9:
+                    passed += 1
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+    return passed, total
+
+
+def _evaluate_cpp(student_file: Path, config: ProblemConfig) -> TestSummary:
+    contract = config.java_contract or {}
+    function_name = str(contract.get("method_name") or "solve")
+    mode = contract.get("mode") if isinstance(contract.get("mode"), str) else None
+    visible_passed, visible_total = _evaluate_cpp_cases(student_file, function_name, config.java_visible_cases, mode)
+    hidden_passed, hidden_total = _evaluate_cpp_cases(student_file, function_name, config.java_hidden_cases, mode)
+
+    total = visible_total + hidden_total
+    passed = visible_passed + hidden_passed
+    (
+        score,
+        visible_weight,
+        hidden_weight,
+        visible_score_percent,
+        hidden_score_percent,
+        weighted_visible_contribution,
+        weighted_hidden_contribution,
+    ) = _weighted_score(visible_passed, visible_total, hidden_passed, hidden_total, config.scoring)
+    return TestSummary(
+        total=total,
+        passed=passed,
+        score=score,
+        visible_total=visible_total,
+        visible_passed=visible_passed,
+        hidden_total=hidden_total,
+        hidden_passed=hidden_passed,
+        visible_weight=visible_weight,
+        hidden_weight=hidden_weight,
+        visible_score_percent=visible_score_percent,
+        hidden_score_percent=hidden_score_percent,
+        weighted_visible_contribution=weighted_visible_contribution,
+        weighted_hidden_contribution=weighted_hidden_contribution,
+    )
+
+
+def _evaluate_c_cases(student_file: Path, function_name: str, cases: list[list[object]], mode: str | None) -> tuple[int, int]:
+    """C contract-style evaluation (limited).
+
+    For robust cross-language evaluation, prefer IO-style assignments stored in DB test_cases.
+    """
+    if shutil.which("gcc") is None:
+        raise RuntimeError("C compiler not found (gcc).")
+
+    passed = 0
+    total = 0
+    temp_dir = Path(tempfile.mkdtemp(prefix="c_eval_"))
+    try:
+        submission_c = temp_dir / "submission.c"
+        submission_c.write_text(student_file.read_text(encoding="utf-8", errors="replace").lstrip("\ufeff"), encoding="utf-8")
+
+        harness_c = temp_dir / "harness.c"
+        if mode == "string_unary":
+            # Expect: const char* <function>(const char* in);
+            harness_c.write_text(
+                "\n".join(
+                    [
+                        "#include <stdio.h>",
+                        "#include <string.h>",
+                        'extern const char* ' + function_name + '(const char* in);',
+                        "int main(int argc, char** argv) {",
+                        "  if (argc < 3) return 2;",
+                        "  const char* in = argv[1];",
+                        "  const char* expected = argv[2];",
+                        "  const char* out = " + function_name + "(in);",
+                        "  if (!out) return 3;",
+                        "  if (strcmp(out, expected) == 0) { printf(\"PASS\\n\"); return 0; }",
+                        "  printf(\"FAIL\\n\"); return 1;",
+                        "}",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+        else:
+            # Expect: double <function>(double a, double b);
+            harness_c.write_text(
+                "\n".join(
+                    [
+                        "#include <stdio.h>",
+                        "#include <stdlib.h>",
+                        "#include <math.h>",
+                        "extern double " + function_name + "(double a, double b);",
+                        "int main(int argc, char** argv) {",
+                        "  if (argc < 4) return 2;",
+                        "  double a = atof(argv[1]);",
+                        "  double b = atof(argv[2]);",
+                        "  double expected = atof(argv[3]);",
+                        "  double out = " + function_name + "(a, b);",
+                        "  if (fabs(out - expected) <= 1e-9) { printf(\"PASS\\n\"); return 0; }",
+                        "  printf(\"FAIL\\n\"); return 1;",
+                        "}",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+        exe = temp_dir / "prog"
+        cp = subprocess.run(
+            ["gcc", "-O2", "-std=c11", submission_c.name, harness_c.name, "-lm", "-o", exe.name],
+            cwd=temp_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+        if cp.returncode != 0:
+            raise RuntimeError(cp.stderr or cp.stdout or "C compilation failed.")
+
+        for case in cases:
+            if not isinstance(case, list) or len(case) < 2:
+                continue
+            total += 1
+            if mode == "string_unary":
+                raw_in = str(case[0])
+                expected = str(case[1])
+                args = [str(exe), raw_in, expected]
+            else:
+                a = float(case[0])
+                b = float(case[1])
+                expected = float(case[2]) if len(case) > 2 else 0.0
+                args = [str(exe), str(a), str(b), str(expected)]
+            cp2 = subprocess.run(args, cwd=temp_dir, capture_output=True, text=True, check=False, timeout=5)
+            if cp2.returncode == 0:
+                passed += 1
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+    return passed, total
+
+
+def _evaluate_c(student_file: Path, config: ProblemConfig) -> TestSummary:
+    contract = config.java_contract or {}
+    function_name = str(contract.get("method_name") or "solve")
+    mode = contract.get("mode") if isinstance(contract.get("mode"), str) else None
+    visible_passed, visible_total = _evaluate_c_cases(student_file, function_name, config.java_visible_cases, mode)
+    hidden_passed, hidden_total = _evaluate_c_cases(student_file, function_name, config.java_hidden_cases, mode)
+
+    total = visible_total + hidden_total
+    passed = visible_passed + hidden_passed
+    (
+        score,
+        visible_weight,
+        hidden_weight,
+        visible_score_percent,
+        hidden_score_percent,
+        weighted_visible_contribution,
+        weighted_hidden_contribution,
+    ) = _weighted_score(visible_passed, visible_total, hidden_passed, hidden_total, config.scoring)
+    return TestSummary(
+        total=total,
+        passed=passed,
+        score=score,
+        visible_total=visible_total,
+        visible_passed=visible_passed,
+        hidden_total=hidden_total,
+        hidden_passed=hidden_passed,
+        visible_weight=visible_weight,
+        hidden_weight=hidden_weight,
+        visible_score_percent=visible_score_percent,
+        hidden_score_percent=hidden_score_percent,
+        weighted_visible_contribution=weighted_visible_contribution,
+        weighted_hidden_contribution=weighted_hidden_contribution,
+    )
+
+
 def _evaluate_python(student_file: Path, config: ProblemConfig) -> TestSummary:
     repo_root = _get_repo_root()
     visible_test_file = repo_root / config.python_visible_test
@@ -811,13 +1490,53 @@ def evaluate_student(
     student_name: str,
     result_file: Path,
     problem_id: str,
+    extra_hidden_cases_path: Path | None = None,
 ) -> int:
     repo_root = _get_repo_root()
-    language = "python" if student_file.suffix.lower() == ".py" else "java"
+    suffix = student_file.suffix.lower()
+    if suffix == ".py":
+        language = "python"
+    elif suffix == ".java":
+        language = "java"
+    elif suffix == ".js":
+        language = "javascript"
+    elif suffix == ".c":
+        language = "c"
+    else:
+        language = "cpp"
     username = _infer_username(student_file)
+
+    # Coding-interview style IO testcases (from SQLite DB). If present, prefer this mode.
+    try:
+        from assignment_intel.testcases import load_io_test_cases
+
+        io_cases = load_io_test_cases(problem_id)
+    except Exception:
+        io_cases = []
+
+    if io_cases:
+        try:
+            summary = _evaluate_io_cases(language=language, student_file=student_file, cases=io_cases)
+        except (RuntimeError, subprocess.TimeoutExpired, ValueError) as exc:
+            print(f"Error: {exc}")
+            return 1
+
+        summary.anti_cheat_passed = True
+        summary.anti_cheat_violations = []
+        summary.plagiarism_detected = False
+        summary.plagiarism_matches = []
+        summary.plagiarism_risk_score = 0.0
+        summary.plagiarism_evidence = []
+        _write_result(result_file=result_file, student_name=student_name, problem_id=problem_id, language=language, summary=summary)
+        json_path = _write_result_json(result_file=result_file, student_name=student_name, problem_id=problem_id, language=language, summary=summary)
+        print(f"Result saved to: {result_file}")
+        print(f"Result JSON saved to: {json_path}")
+        return 0
 
     try:
         config = _load_problem_config(problem_id)
+        if extra_hidden_cases_path and extra_hidden_cases_path.exists() and language != "python":
+            config = _merge_extra_hidden_cases(config, extra_hidden_cases_path)
     except RuntimeError as exc:
         print(f"Error: {exc}")
         return 1
@@ -825,8 +1544,12 @@ def evaluate_student(
     try:
         if language == "python":
             violations = _run_python_anti_cheat(student_file, config.anti_cheat)
-        else:
+        elif language == "java":
             violations = _run_java_anti_cheat(student_file, config.anti_cheat)
+        elif language == "javascript":
+            violations = _run_javascript_anti_cheat(student_file, config.anti_cheat)
+        else:
+            violations = _run_cpp_anti_cheat(student_file, config.anti_cheat)
     except (OSError, SyntaxError) as exc:
         print(f"Error: anti-cheat failed: {exc}")
         return 1
@@ -876,8 +1599,14 @@ def evaluate_student(
     try:
         if language == "python":
             summary = _evaluate_python(student_file, config)
-        else:
+        elif language == "java":
             summary = _evaluate_java(student_file, config)
+        elif language == "javascript":
+            summary = _evaluate_javascript(student_file, config)
+        elif language == "c":
+            summary = _evaluate_c(student_file, config)
+        else:
+            summary = _evaluate_cpp(student_file, config)
     except (RuntimeError, ET.ParseError, ValueError, subprocess.TimeoutExpired) as exc:
         print(f"Error: {exc}")
         return 1
@@ -920,7 +1649,14 @@ def main() -> int:
     result_file = Path(args.result_file).resolve()
     problem_id = args.problem_id.strip() if args.problem_id else _infer_problem_id(student_file)
 
-    return evaluate_student(student_file=student_file, student_name=student_name, result_file=result_file, problem_id=problem_id)
+    extra_hidden = Path(args.extra_hidden_cases).resolve() if args.extra_hidden_cases else None
+    return evaluate_student(
+        student_file=student_file,
+        student_name=student_name,
+        result_file=result_file,
+        problem_id=problem_id,
+        extra_hidden_cases_path=extra_hidden,
+    )
 
 
 if __name__ == "__main__":

@@ -1,9 +1,12 @@
 .venv/
 .pytest_cache/
+.pytest_cache_dir/
+.pytest_tmp/
 __pycache__/
 tests/__pycache__/
 submissions/**/__pycache__/
 *.pyc
+sandbox_tmp/
 
 # Local evaluation outputs
 result.txt
@@ -15,11 +18,38 @@ results/batch/
 results/evaluation_report_*.json
 results/attempt_history.jsonl
 results/local_runs/
+results/platform.db
+results/platform.db-shm
+results/platform.db-wal
+results/reports/
+results/single/
+results/cache_dir/
+results/tmpdir/
+results/auto_assign_state.json
+results/marks.csv
 tmp_*.py
 tmp_*.java
 tmp_*.txt
 tmp_*.json
 
+# Secrets — never commit
+.env
+
+# ChromaDB vector store (rebuilt on CI from problem.json files)
+.chroma_db/
+
 # OS/editor
 .DS_Store
 Thumbs.db
+.vscode/
+
+# Test artifacts
+test_pipeline.py
+logs/*.jsonl
+logs/*.json
+
+# Submissions (student code — not for repo)
+submissions/
+
+# Pytest temp dirs
+pytest-cache-files-*/

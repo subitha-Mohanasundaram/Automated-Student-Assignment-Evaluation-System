@@ -1,0 +1,6 @@
+{
+  "ok": false,
+  "error": "openai_timeout",
+  "detail": "Request timed out.",
+  "hint": "Set OPENAI_TIMEOUT_S=120 and retry. Also confirm api.openai.com:443 is reachable."
+}

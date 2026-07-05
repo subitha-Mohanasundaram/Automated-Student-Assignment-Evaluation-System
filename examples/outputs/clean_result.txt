@@ -1,0 +1,17 @@
+Student Name: CandidateGood
+Problem ID: left_rotation
+Language: java
+Total Test Cases: 0
+Passed Cases: 0
+Visible Passed: 0/0
+Hidden Passed: 0/0
+Visible Weight: 0.6
+Hidden Weight: 0.4
+Visible Score Percent: 0.0
+Hidden Score Percent: 0.0
+Weighted Visible Contribution: 0.0
+Weighted Hidden Contribution: 0.0
+Anti-Cheat: PASS
+Plagiarism: NOT_DETECTED
+Plagiarism Risk Score: 77.47
+Score: 0.0

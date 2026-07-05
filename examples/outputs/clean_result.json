@@ -1,0 +1,32 @@
+{
+  "student_name": "CandidateGood",
+  "problem_id": "left_rotation",
+  "language": "java",
+  "total_test_cases": 0,
+  "passed_cases": 0,
+  "visible": {
+    "passed": 0,
+    "total": 0,
+    "weight": 0.6,
+    "score_percent": 0.0,
+    "weighted_contribution": 0.0
+  },
+  "hidden": {
+    "passed": 0,
+    "total": 0,
+    "weight": 0.4,
+    "score_percent": 0.0,
+    "weighted_contribution": 0.0
+  },
+  "anti_cheat": {
+    "passed": true,
+    "violations": []
+  },
+  "plagiarism": {
+    "detected": false,
+    "matches": [],
+    "risk_score": 77.47,
+    "evidence": []
+  },
+  "score": 0.0
+}

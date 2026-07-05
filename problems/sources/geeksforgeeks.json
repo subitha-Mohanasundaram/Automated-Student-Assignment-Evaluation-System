@@ -1,0 +1,8 @@
+[
+  {
+    "id": "reverse-words",
+    "title": "Reverse Words in a Given String",
+    "description": "Reverse words in a string separated by dots/spaces (handle edge cases).",
+    "url": "https://www.geeksforgeeks.org/reverse-words-in-a-given-string/"
+  }
+]

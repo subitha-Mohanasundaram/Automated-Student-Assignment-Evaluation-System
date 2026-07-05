@@ -133,6 +133,24 @@ jobs:
             assignment-grader:latest \
             sh -lc "python evaluator.py '${{ steps.submission.outputs.file }}' --student-name '${{ steps.submission.outputs.display_name }}' --result-file result.txt $PROBLEM_ARG"
 
+      - name: Install Explanation Agent dependencies
+        run: |
+          pip install --quiet groq chromadb pydantic
+
+      - name: Run Explanation Agent
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          PROBLEM_ARG=""
+          if [ -n "${{ steps.submission.outputs.problem_id }}" ]; then
+            PROBLEM_ARG="--problem-id ${{ steps.submission.outputs.problem_id }}"
+          fi
+          python run_explain_agent.py \
+            '${{ steps.submission.outputs.file }}' \
+            --result-json result.json \
+            --result-txt result.txt \
+            $PROBLEM_ARG
+
       - name: Save metadata artifact
         shell: bash
         run: |

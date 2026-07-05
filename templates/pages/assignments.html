@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <!-- Page header -->
+  <div class="section-header">
+    <div>
+      <div class="inline-flex items-center gap-2 rounded-full bg-brand-50 px-3 py-1 text-[11px] font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-300 mb-2">
+        <span data-lucide="list-checks" class="h-3 w-3"></span>
+        Coding Assignments
+      </div>
+      <h1 class="section-title">Assignments</h1>
+      <p class="section-subtitle">Solve problems, submit code, and track your progress.</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <a href="/me" class="btn btn-secondary btn-sm">
+        <span data-lucide="layout-dashboard" class="h-3.5 w-3.5"></span>
+        Dashboard
+      </a>
+    </div>
+  </div>
+
+  <!-- Assignment cards grid -->
+  {% if assignments %}
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {% for a in assignments %}
+        {% set d = (a.difficulty or "")|lower %}
+        {% set diff_color = "from-emerald-500 to-teal-500" if "easy" in d else ("from-red-500 to-rose-600" if "hard" in d else "from-amber-400 to-orange-500") %}
+        {% set diff_badge = "ok" if "easy" in d else ("bad" if "hard" in d else "warn") %}
+
+        <div class="card card-hover relative overflow-hidden flex flex-col">
+          <!-- Difficulty color bar -->
+          <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r {{ diff_color }}"></div>
+
+          <div class="flex items-start justify-between gap-3 pt-2">
+            <div class="min-w-0 flex-1">
+              <div class="text-[11px] font-mono text-slate-400 dark:text-slate-500">{{ a.id }}</div>
+              <div class="mt-1 text-[15px] font-bold leading-snug text-slate-900 dark:text-white truncate">{{ a.title }}</div>
+
+              <div class="mt-2.5 flex flex-wrap items-center gap-1.5">
+                {% if a.active %}
+                  <span class="badge ok"><span data-lucide="check-circle" class="h-3 w-3"></span>Active</span>
+                {% else %}
+                  {% set gs = (a.generation_status or "")|lower %}
+                  {% if "queued" in gs or "running" in gs %}
+                    <span class="badge warn"><span data-lucide="loader" class="h-3 w-3"></span>Generating</span>
+                  {% elif "failed" in gs %}
+                    <span class="badge bad"><span data-lucide="alert-circle" class="h-3 w-3"></span>Failed</span>
+                  {% else %}
+                    <span class="badge warn"><span data-lucide="clock" class="h-3 w-3"></span>Inactive</span>
+                  {% endif %}
+                {% endif %}
+                {% if a.generation_error %}
+                  <span class="badge bad">{{ a.generation_error[:20] }}…</span>
+                {% endif %}
+              </div>
+            </div>
+
+            {% if a.difficulty %}
+              <span class="badge {{ diff_badge }} shrink-0 mt-1">{{ a.difficulty }}</span>
+            {% endif %}
+          </div>
+
+          <!-- Test counts -->
+          <div class="mt-4 flex items-center gap-3 text-[12px] text-slate-500 dark:text-slate-400">
+            <div class="flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1.5 dark:bg-slate-800">
+              <span data-lucide="eye" class="h-3.5 w-3.5 text-slate-400"></span>
+              <span class="font-semibold text-slate-700 dark:text-slate-200">{{ a.visible_tests }}</span>
+              <span>visible</span>
+            </div>
+            <div class="flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1.5 dark:bg-slate-800">
+              <span data-lucide="shield" class="h-3.5 w-3.5 text-slate-400"></span>
+              <span class="font-semibold text-slate-700 dark:text-slate-200">{{ a.hidden_tests }}</span>
+              <span>hidden</span>
+            </div>
+          </div>
+
+          <!-- CTA -->
+          <div class="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-end">
+            {% if a.active %}
+              <a href="/assignment?id={{ a.id }}" class="btn btn-primary btn-sm">
+                Solve <span data-lucide="arrow-right" class="h-3.5 w-3.5"></span>
+              </a>
+            {% else %}
+              <a href="/assignment?id={{ a.id }}" class="btn btn-secondary btn-sm">
+                View <span data-lucide="arrow-right" class="h-3.5 w-3.5"></span>
+              </a>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <!-- Empty state -->
+    <div class="mt-8 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 py-16 text-center dark:border-slate-800">
+      <div class="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 dark:bg-slate-800 mb-4">
+        <span data-lucide="inbox" class="h-8 w-8 text-slate-400"></span>
+      </div>
+      <h3 class="text-base font-bold text-slate-700 dark:text-slate-200">No assignments yet</h3>
+      <p class="mt-1.5 text-sm text-slate-400 dark:text-slate-500">Assignments will appear here once published.</p>
+      {% if user and user.role in ["instructor","admin"] %}
+        <a href="/instructor/assignments" class="btn btn-primary btn-sm mt-5">
+          <span data-lucide="plus" class="h-3.5 w-3.5"></span> Create Assignment
+        </a>
+      {% endif %}
+    </div>
+  {% endif %}
+{% endblock %}

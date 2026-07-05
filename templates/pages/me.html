@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <!-- Profile header -->
+  <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 p-6 md:p-8 text-white shadow-xl shadow-indigo-500/20 mb-6">
+    <!-- Background pattern -->
+    <div class="absolute inset-0 opacity-[0.07]"
+         style="background-image: radial-gradient(circle at 2px 2px, white 1px, transparent 0); background-size: 28px 28px;"></div>
+
+    <div class="relative flex items-center gap-5">
+      <!-- Large avatar -->
+      <div class="avatar h-16 w-16 text-xl shadow-lg shadow-black/20 shrink-0">
+        {{ user.username[:2]|upper }}
+      </div>
+      <div class="min-w-0">
+        <div class="text-xs font-semibold text-white/60 tracking-widest uppercase">My Profile</div>
+        <div class="mt-0.5 text-2xl font-extrabold tracking-tight">{{ user.username }}</div>
+        <div class="mt-2 flex flex-wrap items-center gap-2">
+          <span class="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold text-white">
+            <span data-lucide="{{ 'graduation-cap' if user.role == 'student' else 'badge-check' }}" class="h-3.5 w-3.5"></span>
+            {{ user.role|title }}
+          </span>
+          <span class="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold text-white">
+            <span data-lucide="activity" class="h-3.5 w-3.5"></span>
+            {{ submissions|length }} submissions
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick stats row -->
+    <div class="relative mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div class="rounded-xl bg-white/10 px-4 py-3 backdrop-blur">
+        <div class="text-xs font-semibold text-white/60 uppercase tracking-wider">Problems Solved</div>
+        <div class="mt-1 text-2xl font-extrabold font-mono">{{ best_scores|length }}</div>
+      </div>
+      <div class="rounded-xl bg-white/10 px-4 py-3 backdrop-blur">
+        <div class="text-xs font-semibold text-white/60 uppercase tracking-wider">Total Submissions</div>
+        <div class="mt-1 text-2xl font-extrabold font-mono">{{ submissions|length }}</div>
+      </div>
+      <div class="rounded-xl bg-white/10 px-4 py-3 backdrop-blur sm:block hidden">
+        <div class="text-xs font-semibold text-white/60 uppercase tracking-wider">Best Score</div>
+        <div class="mt-1 text-2xl font-extrabold font-mono">
+          {% if best_scores %}{{ best_scores|map(attribute='score')|max }}{% else %}–{% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main content grid -->
+  <div class="grid grid-cols-1 gap-5 lg:grid-cols-5">
+    <!-- Best scores -->
+    <div class="card lg:col-span-2">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="text-[15px] font-bold text-slate-900 dark:text-white">Best Scores</h2>
+          <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Per problem top score</p>
+        </div>
+        <a href="/assignments" class="btn btn-secondary btn-sm">
+          <span data-lucide="plus" class="h-3.5 w-3.5"></span> Solve More
+        </a>
+      </div>
+      <div class="space-y-2.5">
+        {% for row in best_scores %}
+          {% set score_pct = [(row.score | float), 100] | min %}
+          {% set score_color = "bg-emerald-500" if score_pct >= 80 else ("bg-amber-400" if score_pct >= 50 else "bg-red-500") %}
+          <div class="group rounded-xl border border-slate-100 bg-slate-50 p-3 hover:border-brand-200 hover:bg-brand-50/30 transition dark:border-slate-800 dark:bg-slate-800/40 dark:hover:border-brand-800">
+            <div class="flex items-center justify-between gap-3 mb-2">
+              <div class="font-mono text-[12px] font-semibold text-slate-700 dark:text-slate-200 truncate">{{ row.problem_id }}</div>
+              <div class="flex items-center gap-2 shrink-0">
+                {% set sc = row.score | float %}
+                <span class="badge {{ 'ok' if sc >= 80 else ('warn' if sc >= 50 else 'bad') }} text-[11px] font-mono">{{ row.score }}</span>
+              </div>
+            </div>
+            <!-- Score bar -->
+            <div class="h-1.5 w-full rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+              <div class="{{ score_color }} h-full rounded-full transition-all duration-500" style="width: {{ score_pct }}%"></div>
+            </div>
+            <div class="mt-2 flex gap-2">
+              <a class="text-[11px] font-semibold text-brand-600 hover:underline dark:text-brand-400" href="/assignment?id={{ row.problem_id }}">Open</a>
+              <span class="text-slate-300 dark:text-slate-700">·</span>
+              <a class="text-[11px] font-semibold text-brand-600 hover:underline dark:text-brand-400" href="/leaderboard?assignment_id={{ row.problem_id }}">Leaderboard</a>
+            </div>
+          </div>
+        {% endfor %}
+        {% if not best_scores %}
+          <div class="flex flex-col items-center justify-center py-10 text-center">
+            <span data-lucide="target" class="h-10 w-10 text-slate-300 dark:text-slate-700 mb-3"></span>
+            <p class="text-sm font-semibold text-slate-500 dark:text-slate-400">No submissions yet</p>
+            <p class="text-xs text-slate-400 dark:text-slate-500 mt-1">Solve your first assignment to see scores here.</p>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Submission History -->
+    <div class="card lg:col-span-3">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="text-[15px] font-bold text-slate-900 dark:text-white">Submission History</h2>
+          <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{{ submissions|length }} recent evaluations</p>
+        </div>
+      </div>
+      <div class="overflow-x-auto -mx-1">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Problem</th>
+              <th>Lang</th>
+              <th>Status</th>
+              <th>Score</th>
+              <th class="text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in submissions %}
+              <tr>
+                <td>
+                  <div class="font-mono text-[12px] font-semibold text-slate-700 dark:text-slate-200">{{ s.problem_id }}</div>
+                  <div class="font-mono text-[10px] text-slate-400">{{ s.evaluation_id[:8] }}…</div>
+                </td>
+                <td>
+                  <span class="badge">{{ s.language }}</span>
+                </td>
+                <td>
+                  {% if s.status == "completed" %}
+                    <span class="badge ok"><span data-lucide="check-circle" class="h-3 w-3"></span>Done</span>
+                  {% elif s.status == "failed" %}
+                    <span class="badge bad"><span data-lucide="x-circle" class="h-3 w-3"></span>Failed</span>
+                  {% else %}
+                    <span class="badge warn"><span data-lucide="loader" class="h-3 w-3"></span>{{ s.status }}</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% set sc = s.score | float %}
+                  <span class="font-mono font-bold text-[13px] {{ 'text-emerald-600 dark:text-emerald-400' if sc >= 80 else ('text-amber-600 dark:text-amber-400' if sc >= 50 else 'text-red-600 dark:text-red-400') }}">
+                    {{ s.score }}
+                  </span>
+                </td>
+                <td class="text-right">
+                  <div class="flex items-center justify-end gap-1.5">
+                    {% if s.report_path %}
+                      <a class="btn btn-secondary btn-sm py-1 px-2" href="/report?path={{ s.report_path }}" title="Report">
+                        <span data-lucide="file-text" class="h-3 w-3"></span>
+                      </a>
+                    {% endif %}
+                    <a class="btn btn-secondary btn-sm py-1 px-2" href="/editor?problem_id={{ s.problem_id }}" title="Edit">
+                      <span data-lucide="code-2" class="h-3 w-3"></span>
+                    </a>
+                    <form class="inline" action="/submission/delete" method="post" onsubmit="return confirm('Delete this submission?')">
+                      <input type="hidden" name="evaluation_id" value="{{ s.evaluation_id }}" />
+                      <button class="btn btn-sm py-1 px-2 border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/30" type="submit" title="Delete">
+                        <span data-lucide="trash-2" class="h-3 w-3"></span>
+                      </button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+            {% if not submissions %}
+              <tr>
+                <td colspan="5" class="py-10 text-center">
+                  <span data-lucide="inbox" class="h-8 w-8 text-slate-300 dark:text-slate-700 mx-auto mb-2 block"></span>
+                  <p class="text-sm text-slate-400 dark:text-slate-500">No evaluations yet.</p>
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+{% endblock %}

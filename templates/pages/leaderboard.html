@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <!-- Header -->
+  <div class="section-header">
+    <div>
+      <div class="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-[11px] font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300 mb-2">
+        <span data-lucide="trophy" class="h-3 w-3"></span>
+        Rankings
+      </div>
+      <h1 class="section-title">Leaderboard</h1>
+      <p class="section-subtitle">Assignment: <span class="font-mono font-semibold text-slate-700 dark:text-slate-200">{{ assignment_id }}</span></p>
+    </div>
+    <a href="/assignment?id={{ assignment_id }}" class="btn btn-secondary btn-sm">
+      <span data-lucide="arrow-left" class="h-3.5 w-3.5"></span>
+      Back to Problem
+    </a>
+  </div>
+
+  <!-- Podium top 3 -->
+  {% if rows and rows|length >= 1 %}
+    <div class="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <!-- 2nd place -->
+      {% if rows|length >= 2 %}
+        <div class="order-1 sm:order-1">
+          <div class="card text-center pt-6 pb-5 border-slate-200 dark:border-slate-700">
+            <div class="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-300 to-slate-400 text-white shadow-lg shadow-slate-400/30 mb-3">
+              <span class="text-2xl font-black">2</span>
+            </div>
+            <div class="font-bold text-[15px] text-slate-900 dark:text-white">{{ rows[1].student_name or rows[1].username }}</div>
+            {% if rows[1].student_name and rows[1].username and rows[1].student_name != rows[1].username %}
+              <div class="text-xs text-slate-400 mt-0.5">@{{ rows[1].username }}</div>
+            {% endif %}
+            <div class="mt-2 font-mono text-xl font-extrabold text-slate-600 dark:text-slate-300">{{ rows[1].score }}</div>
+            <div class="mt-2"><span class="badge">🥈 Silver</span></div>
+          </div>
+        </div>
+      {% endif %}
+
+      <!-- 1st place (center, tallest) -->
+      <div class="order-0 sm:order-2">
+        <div class="card text-center pt-7 pb-6 border-amber-300 dark:border-amber-700/60 bg-gradient-to-b from-amber-50 to-white dark:from-amber-900/20 dark:to-slate-900 relative overflow-hidden shadow-lg shadow-amber-500/10">
+          <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-400 to-orange-400"></div>
+          <div class="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-xl shadow-amber-500/35 mb-3">
+            <span class="text-3xl font-black">1</span>
+          </div>
+          <div class="font-extrabold text-[17px] text-slate-900 dark:text-white">{{ rows[0].student_name or rows[0].username }}</div>
+          {% if rows[0].student_name and rows[0].username and rows[0].student_name != rows[0].username %}
+            <div class="text-xs text-slate-400 mt-0.5">@{{ rows[0].username }}</div>
+          {% endif %}
+          <div class="mt-2 font-mono text-2xl font-extrabold text-amber-600 dark:text-amber-400">{{ rows[0].score }}</div>
+          <div class="mt-2"><span class="badge warn">🥇 Champion</span></div>
+        </div>
+      </div>
+
+      <!-- 3rd place -->
+      {% if rows|length >= 3 %}
+        <div class="order-2 sm:order-3">
+          <div class="card text-center pt-6 pb-5 border-orange-200 dark:border-orange-900/40">
+            <div class="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-400 to-amber-600 text-white shadow-lg shadow-orange-400/30 mb-3">
+              <span class="text-2xl font-black">3</span>
+            </div>
+            <div class="font-bold text-[15px] text-slate-900 dark:text-white">{{ rows[2].student_name or rows[2].username }}</div>
+            {% if rows[2].student_name and rows[2].username and rows[2].student_name != rows[2].username %}
+              <div class="text-xs text-slate-400 mt-0.5">@{{ rows[2].username }}</div>
+            {% endif %}
+            <div class="mt-2 font-mono text-xl font-extrabold text-orange-600 dark:text-orange-400">{{ rows[2].score }}</div>
+            <div class="mt-2"><span class="badge warn">🥉 Bronze</span></div>
+          </div>
+        </div>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <!-- Full table -->
+  <div class="card overflow-x-auto">
+    <h2 class="text-[15px] font-bold text-slate-900 dark:text-white mb-4">Full Rankings</h2>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Rank</th>
+          <th>Student</th>
+          <th>Score</th>
+          <th>Progress</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr class="{{ 'bg-amber-50/60 dark:bg-amber-900/10' if row.rank == 1 else ('bg-slate-50/60 dark:bg-slate-800/30' if row.rank == 2 else '') }}">
+            <td class="w-16">
+              {% if row.rank == 1 %}
+                <span class="inline-flex items-center gap-1.5 font-extrabold text-amber-600 dark:text-amber-400">
+                  <span data-lucide="crown" class="h-4 w-4"></span> #1
+                </span>
+              {% elif row.rank == 2 %}
+                <span class="font-bold text-slate-500 dark:text-slate-400">#2</span>
+              {% elif row.rank == 3 %}
+                <span class="font-bold text-orange-600 dark:text-orange-400">#3</span>
+              {% else %}
+                <span class="text-slate-500 dark:text-slate-400 font-mono">#{{ row.rank }}</span>
+              {% endif %}
+            </td>
+            <td>
+              <div class="flex items-center gap-2.5">
+                <div class="avatar h-7 w-7 text-[11px] shrink-0" style="background: linear-gradient(135deg, hsl({{ (row.rank * 47) % 360 }},60%,55%), hsl({{ (row.rank * 47 + 40) % 360 }},60%,45%))">
+                  {{ (row.student_name or row.username)[:1]|upper }}
+                </div>
+                <div>
+                  <div class="font-semibold text-[13px] text-slate-900 dark:text-white">{{ row.student_name or row.username }}</div>
+                  {% if row.student_name and row.username and row.student_name != row.username %}
+                    <div class="text-[11px] text-slate-400">@{{ row.username }}</div>
+                  {% endif %}
+                </div>
+              </div>
+            </td>
+            <td>
+              <span class="font-mono font-bold text-[14px]
+                {% if row.score >= 80 %}text-emerald-600 dark:text-emerald-400
+                {% elif row.score >= 50 %}text-amber-600 dark:text-amber-400
+                {% else %}text-red-600 dark:text-red-400{% endif %}">
+                {{ row.score }}
+              </span>
+            </td>
+            <td class="w-32">
+              <div class="h-1.5 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                <div class="h-full rounded-full transition-all duration-700
+                  {% if row.score >= 80 %}bg-emerald-500{% elif row.score >= 50 %}bg-amber-400{% else %}bg-red-500{% endif %}"
+                     style="width: {{ [row.score | float, 100] | min }}%"></div>
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+        {% if not rows %}
+          <tr>
+            <td colspan="4" class="py-12 text-center">
+              <span data-lucide="trophy" class="h-10 w-10 text-slate-200 dark:text-slate-800 mx-auto mb-3 block"></span>
+              <p class="text-sm text-slate-400 dark:text-slate-500">No completed submissions yet.</p>
+            </td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

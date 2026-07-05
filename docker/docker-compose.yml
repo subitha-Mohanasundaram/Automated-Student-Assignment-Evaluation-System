@@ -1,0 +1,18 @@
+services:
+  dashboard:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+    environment:
+      - SANDBOX_MODE=local
+    ports:
+      - "8080:8080"
+  mcp:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.mcp
+    environment:
+      - SANDBOX_MODE=local
+    ports:
+      - "8000:8000"
+

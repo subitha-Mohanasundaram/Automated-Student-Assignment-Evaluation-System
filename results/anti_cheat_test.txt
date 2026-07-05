@@ -1,0 +1,19 @@
+Student Name: subi
+Problem ID: two_sum
+Language: python
+Total Test Cases: 0
+Passed Cases: 0
+Visible Passed: 0/0
+Hidden Passed: 0/0
+Visible Weight: 0.6
+Hidden Weight: 0.4
+Visible Score Percent: 0.0
+Hidden Score Percent: 0.0
+Weighted Visible Contribution: 0.0
+Weighted Hidden Contribution: 0.0
+Anti-Cheat: FAIL
+Plagiarism: NOT_DETECTED
+Plagiarism Risk Score: 23.35
+Score: 0.0
+Anti-Cheat Violations:
+- Disallowed import: os

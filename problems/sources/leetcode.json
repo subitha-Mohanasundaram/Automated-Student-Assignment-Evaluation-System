@@ -1,0 +1,14 @@
+[
+  {
+    "id": "two-sum",
+    "title": "Two Sum",
+    "description": "Given an array of integers and a target, return indices of two numbers that add up to the target.",
+    "url": "https://leetcode.com/problems/two-sum/"
+  },
+  {
+    "id": "valid-parentheses",
+    "title": "Valid Parentheses",
+    "description": "Given a string with parentheses/brackets/braces, determine if it is valid.",
+    "url": "https://leetcode.com/problems/valid-parentheses/"
+  }
+]
