@@ -1,316 +1,422 @@
 {% extends "base.html" %}
 
 {% block content %}
-  <div class="mx-auto max-w-5xl">
-    <div class="flex items-start justify-between gap-4">
+<div class="mx-auto max-w-5xl">
+
+  <!-- ── Hero header ──────────────────────────────────────────────────── -->
+  <div class="relative overflow-hidden rounded-2xl mb-6
+    {% if score >= 80 %}bg-gradient-to-br from-emerald-600 to-teal-700 shadow-emerald-500/20
+    {% elif score >= 50 %}bg-gradient-to-br from-amber-500 to-orange-600 shadow-amber-500/20
+    {% else %}bg-gradient-to-br from-red-600 to-rose-700 shadow-red-500/20{% endif %}
+    shadow-xl p-6 text-white">
+    <div class="absolute inset-0 opacity-[0.06]"
+         style="background-image: radial-gradient(circle at 2px 2px, white 1px, transparent 0); background-size: 24px 24px;"></div>
+    <div class="relative flex items-start justify-between gap-4 flex-wrap">
       <div>
-        <h1 class="text-2xl font-bold tracking-tight">Report</h1>
-        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
-          Student: <span class="font-mono">{{ student }}</span>
-          <span class="text-slate-400">|</span>
-          Problem: <span class="font-mono">{{ problem_id }}</span>
-          <span class="text-slate-400">|</span>
-          Language: <span class="font-mono">{{ language }}</span>
-        </p>
+        <div class="text-xs font-semibold text-white/60 uppercase tracking-widest">Evaluation Report</div>
+        <div class="mt-1 text-xl font-extrabold tracking-tight">{{ student or "Student" }}</div>
+        <div class="mt-2 flex flex-wrap items-center gap-2 text-sm">
+          <span class="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold">
+            <span data-lucide="puzzle" class="h-3.5 w-3.5"></span>{{ problem_id }}
+          </span>
+          <span class="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold">
+            <span data-lucide="code-2" class="h-3.5 w-3.5"></span>{{ language }}
+          </span>
+          {% if submitted_at %}
+            <span class="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold">
+              <span data-lucide="clock" class="h-3.5 w-3.5"></span>{{ submitted_at[:16] }}
+            </span>
+          {% endif %}
+        </div>
       </div>
       <div class="text-right">
-        {% if score >= 80 %}
-          <span class="badge ok">score {{ score }}</span>
-        {% elif score >= 50 %}
-          <span class="badge warn">score {{ score }}</span>
-        {% else %}
-          <span class="badge bad">score {{ score }}</span>
-        {% endif %}
-        <div class="mt-2 text-xs text-slate-500 dark:text-slate-400 font-mono">{{ submitted_at }}</div>
+        <div class="text-xs font-semibold text-white/60 uppercase tracking-wider mb-1">Score</div>
+        <div class="text-5xl font-black font-mono tracking-tight">{{ score }}</div>
+        <div class="text-xs text-white/60 mt-1">{{ passed }}/{{ total }} tests passed</div>
       </div>
     </div>
 
-    <div class="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-4">
-      <div class="card lg:col-span-1">
-        <div class="text-xs text-slate-500 dark:text-slate-400">Passed</div>
-        <div class="mt-1 text-xl font-bold">{{ passed }}/{{ total }}</div>
-        <div class="mt-4 text-xs text-slate-500 dark:text-slate-400">Visible</div>
-        <div class="mt-1 text-sm font-mono">{{ visible.passed }}/{{ visible.total }} ({{ visible.weighted_contribution }} pts)</div>
-        <div class="mt-4 text-xs text-slate-500 dark:text-slate-400">Hidden</div>
-        <div class="mt-1 text-sm font-mono">{{ hidden.passed }}/{{ hidden.total }} ({{ hidden.weighted_contribution }} pts)</div>
-        <div class="mt-4">
-          {% if anti_cheat_passed %}
-            <span class="badge ok">anti-cheat pass</span>
-          {% else %}
-            <span class="badge bad">anti-cheat fail</span>
-          {% endif %}
+    <!-- Score progress bar -->
+    <div class="relative mt-5 h-2 w-full rounded-full bg-white/20 overflow-hidden">
+      <div class="h-full rounded-full bg-white/80 transition-all duration-1000" style="width: {{ [score|float, 100]|min }}%"></div>
+    </div>
+  </div>
+
+  <!-- ── Main grid ──────────────────────────────────────────────────────── -->
+  <div class="grid grid-cols-1 gap-5 lg:grid-cols-4">
+
+    <!-- Left sidebar: stats -->
+    <div class="lg:col-span-1 space-y-4">
+
+      <!-- Score breakdown -->
+      <div class="card">
+        <h3 class="text-[12px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-3">Score Breakdown</h3>
+        <div class="space-y-3">
+          <div>
+            <div class="flex items-center justify-between text-[12px] mb-1">
+              <span class="text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                <span data-lucide="eye" class="h-3.5 w-3.5"></span> Visible
+              </span>
+              <span class="font-mono font-bold text-slate-700 dark:text-slate-200">{{ visible.passed }}/{{ visible.total }}</span>
+            </div>
+            <div class="h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+              <div class="h-full rounded-full bg-sky-500 transition-all duration-700"
+                   style="width: {{ ((visible.passed / visible.total * 100) if visible.total else 0)|round|int }}%"></div>
+            </div>
+            <div class="text-[11px] text-slate-400 mt-0.5">{{ visible.weighted_contribution }} pts</div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between text-[12px] mb-1">
+              <span class="text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                <span data-lucide="shield" class="h-3.5 w-3.5"></span> Hidden
+              </span>
+              <span class="font-mono font-bold text-slate-700 dark:text-slate-200">{{ hidden.passed }}/{{ hidden.total }}</span>
+            </div>
+            <div class="h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+              <div class="h-full rounded-full bg-violet-500 transition-all duration-700"
+                   style="width: {{ ((hidden.passed / hidden.total * 100) if hidden.total else 0)|round|int }}%"></div>
+            </div>
+            <div class="text-[11px] text-slate-400 mt-0.5">{{ hidden.weighted_contribution }} pts</div>
+          </div>
         </div>
-        <div class="mt-2">
-          {% if plagiarism_detected %}
-            <span class="badge bad">plagiarism flagged</span>
-          {% else %}
-            <span class="badge ok">plagiarism clear</span>
-          {% endif %}
-        </div>
-        <div class="mt-4 flex flex-col gap-2">
-          <a class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800"
-             href="/leaderboard?assignment_id={{ problem_id }}">Leaderboard</a>
-          {% if user and (user.role == "student") %}
-            <a class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800"
-               href="/editor?problem_id={{ problem_id }}">Edit & Resubmit</a>
-          {% endif %}
+
+        <!-- Anti-cheat + plagiarism -->
+        <div class="mt-4 space-y-2 pt-4 border-t border-slate-100 dark:border-slate-800">
+          <div class="flex items-center justify-between">
+            <span class="text-[12px] text-slate-500 dark:text-slate-400">Anti-Cheat</span>
+            {% if anti_cheat_passed %}
+              <span class="badge ok text-[10px]"><span data-lucide="check" class="h-3 w-3"></span>Pass</span>
+            {% else %}
+              <span class="badge bad text-[10px]"><span data-lucide="x" class="h-3 w-3"></span>Fail</span>
+            {% endif %}
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-[12px] text-slate-500 dark:text-slate-400">Plagiarism</span>
+            {% if plagiarism_detected %}
+              <span class="badge bad text-[10px]"><span data-lucide="alert-triangle" class="h-3 w-3"></span>Flagged</span>
+            {% else %}
+              <span class="badge ok text-[10px]"><span data-lucide="shield-check" class="h-3 w-3"></span>Clear</span>
+            {% endif %}
+          </div>
         </div>
       </div>
 
-      <div class="lg:col-span-3 space-y-4">
-        {% if relevance and relevance.relevant is sameas false %}
-          <div class="card border-red-200 bg-red-50 text-red-900 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-100">
-            <div class="flex items-start justify-between gap-3">
+      <!-- Complexity -->
+      {% if complexity and (complexity.time_complexity or complexity.space_complexity) %}
+        <div class="card">
+          <h3 class="text-[12px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-3">Complexity</h3>
+          <div class="space-y-2">
+            <div class="rounded-xl bg-slate-50 dark:bg-slate-800/50 px-3 py-2.5">
+              <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Time</div>
+              <div class="mt-1 font-mono text-sm font-bold text-slate-800 dark:text-slate-100">{{ complexity.time_complexity or "—" }}</div>
+            </div>
+            <div class="rounded-xl bg-slate-50 dark:bg-slate-800/50 px-3 py-2.5">
+              <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Space</div>
+              <div class="mt-1 font-mono text-sm font-bold text-slate-800 dark:text-slate-100">{{ complexity.space_complexity or "—" }}</div>
+            </div>
+          </div>
+        </div>
+      {% endif %}
+
+      <!-- Action buttons -->
+      <div class="space-y-2">
+        <a class="btn btn-secondary w-full justify-center" href="/leaderboard?assignment_id={{ problem_id }}">
+          <span data-lucide="trophy" class="h-4 w-4 text-amber-500"></span> Leaderboard
+        </a>
+        {% if user and user.role == "student" %}
+          <a class="btn btn-primary w-full justify-center" href="/editor?problem_id={{ problem_id }}">
+            <span data-lucide="code-2" class="h-4 w-4"></span> Edit & Resubmit
+          </a>
+        {% endif %}
+        <a class="btn btn-secondary w-full justify-center" href="/me">
+          <span data-lucide="layout-dashboard" class="h-4 w-4"></span> Dashboard
+        </a>
+      </div>
+    </div>
+
+    <!-- Right: main content -->
+    <div class="lg:col-span-3 space-y-5">
+
+      <!-- Relevance error -->
+      {% if relevance and relevance.relevant is sameas false %}
+        <div class="card border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-950/30">
+          <div class="flex items-start gap-3">
+            <span data-lucide="alert-circle" class="h-5 w-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5"></span>
+            <div>
+              <div class="text-sm font-bold text-red-900 dark:text-red-100">Submission not relevant to this problem</div>
+              <div class="mt-1 text-sm text-red-700 dark:text-red-300 opacity-90">{{ relevance.reason or "Your submission does not appear to match the assignment requirements." }}</div>
+            </div>
+            <span class="badge bad shrink-0">blocked</span>
+          </div>
+        </div>
+      {% endif %}
+
+      <!-- ── CodeMentor AI Feedback ──────────────────────────────────── -->
+      {% if ai_feedback and ai_feedback.explanation %}
+        <div class="card relative overflow-hidden border-indigo-200 dark:border-indigo-900/50"
+             style="background: linear-gradient(to bottom right, rgba(99,102,241,0.03), transparent);">
+          <!-- Top accent bar -->
+          <div class="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 rounded-t-[16px]"></div>
+
+          <!-- Header -->
+          <div class="flex items-start justify-between gap-3 flex-wrap pt-1">
+            <div class="flex items-center gap-2.5">
+              <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-md shadow-indigo-500/25">
+                <span data-lucide="bot" class="h-4.5 w-4.5 text-white"></span>
+              </div>
               <div>
-                <div class="text-sm font-semibold">Submission not relevant to the problem</div>
-                <div class="mt-2 text-sm opacity-90">{{ relevance.reason or "Your submission does not appear to match the assignment requirements." }}</div>
+                <div class="text-[15px] font-extrabold text-slate-900 dark:text-white tracking-tight">CodeMentor AI</div>
+                <div class="text-[11px] text-indigo-600 dark:text-indigo-400 font-semibold">ReAct Agent · LLaMA 3.3-70B · Groq</div>
               </div>
-              <span class="badge bad">blocked</span>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+              {% if ai_feedback.confidence %}
+                {% set conf_pct = (ai_feedback.confidence * 100)|int %}
+                <div class="flex items-center gap-1.5 rounded-full border px-3 py-1
+                  {% if conf_pct >= 80 %}border-emerald-200 bg-emerald-50 dark:border-emerald-800/40 dark:bg-emerald-900/20{% elif conf_pct >= 50 %}border-amber-200 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-900/20{% else %}border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800{% endif %}">
+                  <span data-lucide="target" class="h-3 w-3 {% if conf_pct >= 80 %}text-emerald-600{% elif conf_pct >= 50 %}text-amber-500{% else %}text-slate-400{% endif %}"></span>
+                  <span class="text-[11px] font-bold {% if conf_pct >= 80 %}text-emerald-700 dark:text-emerald-300{% elif conf_pct >= 50 %}text-amber-700 dark:text-amber-300{% else %}text-slate-600 dark:text-slate-300{% endif %}">
+                    {{ conf_pct }}% confidence
+                  </span>
+                </div>
+              {% endif %}
+              {% if ai_feedback.reasoning_turns %}
+                <span class="badge info text-[10px]">
+                  <span data-lucide="refresh-cw" class="h-3 w-3"></span>
+                  {{ ai_feedback.reasoning_turns }} turn{{ 's' if ai_feedback.reasoning_turns != 1 else '' }}
+                </span>
+              {% endif %}
             </div>
           </div>
-        {% endif %}
 
-        {% if complexity and (complexity.time_complexity or complexity.space_complexity) %}
-          <div class="card">
-            <div class="flex items-center justify-between">
-              <h2 class="text-sm font-semibold">Complexity</h2>
-              <div class="text-xs text-slate-500 dark:text-slate-400">best-effort estimate</div>
+          <!-- Feedback sections -->
+          <div class="mt-5 space-y-3">
+            <!-- What went wrong -->
+            <div class="rounded-xl border border-slate-200 bg-white px-4 py-3.5 dark:border-slate-700 dark:bg-slate-800/50">
+              <div class="flex items-center gap-2 mb-2">
+                <span data-lucide="search" class="h-3.5 w-3.5 text-slate-400"></span>
+                <div class="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">What went wrong</div>
+              </div>
+              <div class="text-sm text-slate-800 dark:text-slate-100 leading-relaxed">{{ ai_feedback.explanation }}</div>
             </div>
-            <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 text-sm">
-              <div class="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
-                <div class="text-xs font-semibold text-slate-500 dark:text-slate-400">Time</div>
-                <div class="mt-1 font-mono">{{ complexity.time_complexity or "unknown" }}</div>
+
+            <!-- Likely cause + root cause side by side -->
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {% if ai_feedback.likely_cause %}
+                <div class="rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 dark:border-orange-800/40 dark:bg-orange-900/15">
+                  <div class="flex items-center gap-2 mb-2">
+                    <span data-lucide="map-pin" class="h-3.5 w-3.5 text-orange-500"></span>
+                    <div class="text-[10px] font-black uppercase tracking-widest text-orange-600 dark:text-orange-400">Likely Cause</div>
+                  </div>
+                  <div class="font-mono text-[12px] text-orange-900 dark:text-orange-100 leading-relaxed">{{ ai_feedback.likely_cause }}</div>
+                </div>
+              {% endif %}
+              {% if ai_feedback.root_cause %}
+                <div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 dark:border-red-800/40 dark:bg-red-900/15">
+                  <div class="flex items-center gap-2 mb-2">
+                    <span data-lucide="bug" class="h-3.5 w-3.5 text-red-500"></span>
+                    <div class="text-[10px] font-black uppercase tracking-widest text-red-600 dark:text-red-400">Root Cause</div>
+                  </div>
+                  <div class="font-mono text-[12px] text-red-900 dark:text-red-100 leading-relaxed">{{ ai_feedback.root_cause }}</div>
+                </div>
+              {% endif %}
+            </div>
+
+            <!-- Why hidden tests fail -->
+            {% if ai_feedback.why_hidden_fail %}
+              <div class="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 dark:border-violet-800/40 dark:bg-violet-900/15">
+                <div class="flex items-center gap-2 mb-2">
+                  <span data-lucide="shield" class="h-3.5 w-3.5 text-violet-500"></span>
+                  <div class="text-[10px] font-black uppercase tracking-widest text-violet-600 dark:text-violet-400">Why Hidden Tests Fail</div>
+                </div>
+                <div class="text-sm text-violet-900 dark:text-violet-100 leading-relaxed">{{ ai_feedback.why_hidden_fail }}</div>
               </div>
-              <div class="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
-                <div class="text-xs font-semibold text-slate-500 dark:text-slate-400">Space</div>
-                <div class="mt-1 font-mono">{{ complexity.space_complexity or "unknown" }}</div>
+            {% endif %}
+
+            <!-- Hint (prominent) -->
+            <div class="rounded-xl border-2 border-indigo-200 bg-indigo-50 px-4 py-4 dark:border-indigo-800/50 dark:bg-indigo-900/20">
+              <div class="flex items-center gap-2 mb-2">
+                <div class="flex h-6 w-6 items-center justify-center rounded-lg bg-indigo-500 shadow-sm shadow-indigo-500/30">
+                  <span data-lucide="lightbulb" class="h-3.5 w-3.5 text-white"></span>
+                </div>
+                <div class="text-[10px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400">Hint</div>
+                <span class="text-[10px] text-indigo-400 dark:text-indigo-500">(not the solution)</span>
               </div>
+              <div class="text-sm font-semibold text-indigo-900 dark:text-indigo-100 leading-relaxed">{{ ai_feedback.hint }}</div>
             </div>
           </div>
-        {% endif %}
 
-        {% if tools and tools|length > 0 %}
-          {% set failing = tools | selectattr("ok", "equalto", false) | list %}
-          {% if failing and failing|length > 0 %}
-            <div class="card border-red-200/60 dark:border-red-900/30">
-              <h2 class="text-sm font-semibold">Errors</h2>
-              <div class="mt-3 space-y-3">
-                {% for t in failing %}
-                  <div class="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-900 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-100">
-                    <div class="flex items-center justify-between gap-3">
-                      <div class="font-mono font-semibold">{{ t.tool }}</div>
-                      <span class="badge bad">failed</span>
-                    </div>
-                    {% if t.error %}
-                      <div class="mt-2 text-xs font-mono opacity-90">{{ t.error }}</div>
-                    {% endif %}
-                    {% if t.debug %}
-                      <details class="mt-2">
-                        <summary class="cursor-pointer text-xs font-semibold">Debug</summary>
-                        <pre class="mt-2 whitespace-pre-wrap rounded-lg bg-slate-950 px-3 py-2 text-xs text-slate-100">{{ t.debug | tojson(indent=2) }}</pre>
-                      </details>
-                    {% endif %}
+          <!-- Agent trace (collapsible) -->
+          {% if ai_feedback.tools_used and ai_feedback.tools_used|length > 0 %}
+            <details class="mt-4 group">
+              <summary class="cursor-pointer list-none flex items-center gap-2 text-[12px] font-semibold text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition select-none">
+                <span data-lucide="terminal" class="h-3.5 w-3.5 text-slate-400"></span>
+                Agent investigation trace
+                <span data-lucide="chevron-down" class="h-3.5 w-3.5 ml-auto transition-transform group-open:rotate-180"></span>
+              </summary>
+              <div class="mt-3 flex flex-wrap gap-2">
+                {% for t in ai_feedback.tools_used %}
+                  <div class="flex items-center gap-1.5 rounded-full border border-indigo-100 bg-white px-3 py-1.5 dark:border-indigo-900/40 dark:bg-slate-900">
+                    <span class="flex h-4 w-4 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-[9px] font-black text-indigo-600 dark:text-indigo-400">{{ loop.index }}</span>
+                    <span class="font-mono text-[11px] font-semibold text-slate-700 dark:text-slate-200">{{ t }}</span>
+                    <span data-lucide="check" class="h-3 w-3 text-emerald-500"></span>
                   </div>
                 {% endfor %}
               </div>
-            </div>
-          {% endif %}
-        {% endif %}
-
-        <div class="card">
-          <div class="flex items-center justify-between">
-            <h2 class="text-sm font-semibold">Visible Test Results</h2>
-            <div class="text-xs text-slate-500 dark:text-slate-400">Hidden/stress tests are not shown</div>
-          </div>
-          <div class="mt-3 overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead class="text-left text-xs text-slate-500 dark:text-slate-400">
-                <tr>
-                  <th class="py-2">#</th>
-                  <th class="py-2">Input</th>
-                  <th class="py-2">Expected</th>
-                  <th class="py-2">Your Output</th>
-                  <th class="py-2">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for c in case_results %}
-                  <tr class="border-t border-slate-200 dark:border-slate-800">
-                    <td class="py-2 font-mono">{{ loop.index }}</td>
-                    <td class="py-2"><pre class="whitespace-pre-wrap rounded-lg bg-slate-950 px-3 py-2 text-xs text-slate-100">{{ c.input }}</pre></td>
-                    <td class="py-2"><pre class="whitespace-pre-wrap rounded-lg bg-slate-950 px-3 py-2 text-xs text-slate-100">{{ c.expected }}</pre></td>
-                    <td class="py-2"><pre class="whitespace-pre-wrap rounded-lg bg-slate-950 px-3 py-2 text-xs text-slate-100">{{ c.actual }}</pre></td>
-                    <td class="py-2">
-                      {% if c.passed %}
-                        <span class="badge ok">PASS</span>
-                      {% else %}
-                        <span class="badge bad">FAIL</span>
-                      {% endif %}
-                    </td>
-                  </tr>
-                {% endfor %}
-                {% if not case_results %}
-                  <tr><td colspan="5" class="py-3 text-slate-500 dark:text-slate-400">No visible case results.</td></tr>
-                {% endif %}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="card">
-          <h2 class="text-sm font-semibold">Feedback</h2>
-          <div class="mt-3 whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-200">{{ feedback }}</div>
-          {% if hints and hints|length > 0 %}
-            <div class="mt-4">
-              <div class="text-xs font-semibold text-slate-500 dark:text-slate-400">Hints</div>
-              <ul class="mt-2 list-disc pl-5 text-sm text-slate-700 dark:text-slate-200">
-                {% for h in hints %}
-                  <li>{{ h }}</li>
-                {% endfor %}
-              </ul>
-            </div>
+            </details>
           {% endif %}
         </div>
+      {% endif %}
 
-        {% if ai_feedback and ai_feedback.explanation %}
-          <div class="card border-indigo-200/60 dark:border-indigo-900/40">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <span data-lucide="bot" class="h-4 w-4 text-indigo-600 dark:text-indigo-400"></span>
-                <h2 class="text-sm font-semibold text-indigo-700 dark:text-indigo-300">CodeMentor AI Feedback</h2>
-              </div>
-              <div class="flex items-center gap-2">
-                {% if ai_feedback.confidence %}
-                  {% if ai_feedback.confidence >= 0.8 %}
-                    <span class="badge ok">confidence {{ (ai_feedback.confidence * 100) | int }}%</span>
-                  {% elif ai_feedback.confidence >= 0.5 %}
-                    <span class="badge warn">confidence {{ (ai_feedback.confidence * 100) | int }}%</span>
-                  {% else %}
-                    <span class="badge">confidence {{ (ai_feedback.confidence * 100) | int }}%</span>
-                  {% endif %}
-                {% endif %}
-                {% if ai_feedback.reasoning_turns %}
-                  <span class="badge">{{ ai_feedback.reasoning_turns }} turn{{ 's' if ai_feedback.reasoning_turns != 1 else '' }}</span>
-                {% endif %}
-              </div>
-            </div>
-
-            <div class="mt-4 space-y-4">
-
-              <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                <div class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">What went wrong</div>
-                <div class="mt-2 text-sm text-slate-800 dark:text-slate-100">{{ ai_feedback.explanation }}</div>
-              </div>
-
-              {% if ai_feedback.likely_cause %}
-                <div class="rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 dark:border-orange-900/40 dark:bg-orange-950/30">
-                  <div class="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">Likely cause</div>
-                  <div class="mt-2 font-mono text-sm text-orange-900 dark:text-orange-100">{{ ai_feedback.likely_cause }}</div>
-                </div>
-              {% endif %}
-
-              {% if ai_feedback.root_cause %}
-                <div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900/40 dark:bg-red-950/30">
-                  <div class="text-xs font-semibold uppercase tracking-wide text-red-600 dark:text-red-400">Root cause</div>
-                  <div class="mt-2 font-mono text-sm text-red-900 dark:text-red-100">{{ ai_feedback.root_cause }}</div>
-                </div>
-              {% endif %}
-
-              {% if ai_feedback.why_hidden_fail %}
-                <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                  <div class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Why hidden tests also fail</div>
-                  <div class="mt-2 text-sm text-slate-700 dark:text-slate-200">{{ ai_feedback.why_hidden_fail }}</div>
-                </div>
-              {% endif %}
-
-              <div class="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 dark:border-indigo-900/40 dark:bg-indigo-950/30">
-                <div class="flex items-center gap-2">
-                  <span data-lucide="lightbulb" class="h-4 w-4 text-indigo-600 dark:text-indigo-400"></span>
-                  <div class="text-xs font-semibold uppercase tracking-wide text-indigo-600 dark:text-indigo-400">Hint</div>
-                </div>
-                <div class="mt-2 text-sm font-medium text-indigo-900 dark:text-indigo-100">{{ ai_feedback.hint }}</div>
-              </div>
-
-            </div>
-
-            {% if ai_feedback.tools_used and ai_feedback.tools_used | length > 0 %}
-              <details class="mt-4">
-                <summary class="cursor-pointer text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">
-                  Agent investigation trace
-                </summary>
-                <div class="mt-3 flex flex-wrap gap-2">
-                  {% for t in ai_feedback.tools_used %}
-                    <span class="rounded-full border border-slate-200 bg-white px-3 py-1 font-mono text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
-                      {{ loop.index }}. {{ t }}
-                    </span>
-                  {% endfor %}
-                </div>
-              </details>
-            {% endif %}
-          </div>
-        {% endif %}
-
-        {% if agent_plan or agent_trace %}
-          <div class="card">
-            <details>
-              <summary class="cursor-pointer text-sm font-semibold">Agent Trace</summary>
-              {% if agent_plan and agent_plan|length > 0 %}
-                <div class="mt-3 text-xs text-slate-500 dark:text-slate-400">
-                  Plan: <span class="font-mono">{{ agent_plan | join(" -> ") }}</span>
-                </div>
-              {% endif %}
-              <div class="mt-3 overflow-x-auto">
-                <table class="w-full text-sm">
-                  <thead class="text-left text-xs text-slate-500 dark:text-slate-400">
-                    <tr>
-                      <th class="py-2">Tool</th>
-                      <th class="py-2">OK</th>
-                      <th class="py-2">Duration</th>
-                      <th class="py-2">Error</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {% for t in agent_trace %}
-                      <tr class="border-t border-slate-200 dark:border-slate-800">
-                        <td class="py-2 font-mono">{{ t.tool }}</td>
-                        <td class="py-2">
-                          {% if t.ok %}
-                            <span class="badge ok">OK</span>
-                          {% else %}
-                            <span class="badge bad">FAIL</span>
-                          {% endif %}
-                        </td>
-                        <td class="py-2 font-mono text-xs">{{ t.duration_ms }} ms</td>
-                        <td class="py-2 text-xs text-slate-600 dark:text-slate-300">{{ t.error or "" }}</td>
-                      </tr>
-                    {% endfor %}
-                    {% if not agent_trace %}
-                      <tr><td colspan="4" class="py-3 text-slate-500 dark:text-slate-400">No trace available.</td></tr>
+      <!-- ── Visible Test Results ──────────────────────────────────────── -->
+      <div class="card">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-[14px] font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <span data-lucide="flask-conical" class="h-4 w-4 text-sky-500"></span>
+            Visible Test Results
+          </h2>
+          <span class="badge info text-[10px]">Hidden tests not shown</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th class="w-10">#</th>
+                <th>Input</th>
+                <th>Expected</th>
+                <th>Your Output</th>
+                <th class="w-20">Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for c in case_results %}
+                <tr class="{{ 'bg-emerald-50/40 dark:bg-emerald-900/10' if c.passed else 'bg-red-50/40 dark:bg-red-900/10' }}">
+                  <td class="font-mono text-slate-400">{{ loop.index }}</td>
+                  <td><pre class="whitespace-pre-wrap rounded-lg bg-slate-950 px-3 py-2 text-xs text-slate-100 max-w-[160px] overflow-x-auto">{{ c.input }}</pre></td>
+                  <td><pre class="whitespace-pre-wrap rounded-lg bg-slate-950 px-3 py-2 text-xs text-slate-100 max-w-[120px] overflow-x-auto">{{ c.expected }}</pre></td>
+                  <td><pre class="whitespace-pre-wrap rounded-lg bg-slate-950 px-3 py-2 text-xs text-slate-100 max-w-[120px] overflow-x-auto">{{ c.actual }}</pre></td>
+                  <td>
+                    {% if c.passed %}
+                      <span class="badge ok text-[11px]"><span data-lucide="check-circle" class="h-3 w-3"></span>PASS</span>
+                    {% else %}
+                      <span class="badge bad text-[11px]"><span data-lucide="x-circle" class="h-3 w-3"></span>FAIL</span>
                     {% endif %}
-                  </tbody>
-                </table>
-              </div>
-            </details>
-          </div>
-        {% endif %}
-
-        {% if stdout %}
-          <div class="card">
-            <details>
-              <summary class="cursor-pointer text-sm font-semibold">Stdout</summary>
-              <pre class="mt-3 whitespace-pre-wrap rounded-lg bg-slate-950 px-3 py-2 text-xs text-slate-100">{{ stdout }}</pre>
-            </details>
-          </div>
-        {% endif %}
-        {% if stderr %}
-          <div class="card">
-            <details open>
-              <summary class="cursor-pointer text-sm font-semibold">Stderr</summary>
-              <pre class="mt-3 whitespace-pre-wrap rounded-lg bg-slate-950 px-3 py-2 text-xs text-slate-100">{{ stderr }}</pre>
-            </details>
-          </div>
-        {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+              {% if not case_results %}
+                <tr><td colspan="5" class="py-8 text-center text-slate-400">No visible test cases.</td></tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
-  </div>
+
+      <!-- ── Errors (failing tools) ───────────────────────────────────── -->
+      {% if tools and tools|length > 0 %}
+        {% set failing = tools|selectattr("ok","equalto",false)|list %}
+        {% if failing|length > 0 %}
+          <div class="card border-red-200/60 dark:border-red-900/30">
+            <h2 class="text-[14px] font-bold text-slate-900 dark:text-white mb-3 flex items-center gap-2">
+              <span data-lucide="alert-triangle" class="h-4 w-4 text-red-500"></span> Errors
+            </h2>
+            <div class="space-y-2">
+              {% for t in failing %}
+                <div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900/40 dark:bg-red-950/30">
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="font-mono text-sm font-bold text-red-900 dark:text-red-100">{{ t.tool }}</div>
+                    <span class="badge bad">failed</span>
+                  </div>
+                  {% if t.error %}
+                    <div class="mt-1.5 font-mono text-xs text-red-700 dark:text-red-300 opacity-90">{{ t.error }}</div>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+      {% endif %}
+
+      <!-- ── Feedback & Hints ──────────────────────────────────────────── -->
+      {% if feedback or (hints and hints|length > 0) %}
+        <div class="card">
+          <h2 class="text-[14px] font-bold text-slate-900 dark:text-white mb-3 flex items-center gap-2">
+            <span data-lucide="message-square" class="h-4 w-4 text-brand-500"></span> Feedback
+          </h2>
+          {% if feedback %}
+            <div class="text-sm text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-wrap">{{ feedback }}</div>
+          {% endif %}
+          {% if hints and hints|length > 0 %}
+            <div class="mt-4 space-y-2">
+              <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Hints</div>
+              {% for h in hints %}
+                <div class="flex items-start gap-2.5 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5 dark:border-amber-900/30 dark:bg-amber-900/15">
+                  <span data-lucide="chevron-right" class="h-4 w-4 text-amber-500 shrink-0 mt-0.5"></span>
+                  <span class="text-sm text-amber-900 dark:text-amber-100">{{ h }}</span>
+                </div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        </div>
+      {% endif %}
+
+      <!-- ── Agent Trace ───────────────────────────────────────────────── -->
+      {% if agent_plan or agent_trace %}
+        <div class="card">
+          <details>
+            <summary class="cursor-pointer text-[14px] font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2 list-none">
+              <span data-lucide="cpu" class="h-4 w-4 text-slate-400"></span>
+              Agent Trace
+              <span data-lucide="chevron-down" class="h-4 w-4 ml-auto text-slate-400"></span>
+            </summary>
+            {% if agent_plan and agent_plan|length > 0 %}
+              <div class="mt-3 text-xs text-slate-500">Plan: <span class="font-mono">{{ agent_plan|join(" → ") }}</span></div>
+            {% endif %}
+            <div class="mt-3 overflow-x-auto">
+              <table class="data-table">
+                <thead><tr><th>Tool</th><th>Status</th><th>Duration</th><th>Error</th></tr></thead>
+                <tbody>
+                  {% for t in agent_trace %}
+                    <tr>
+                      <td class="font-mono text-[12px]">{{ t.tool }}</td>
+                      <td>{% if t.ok %}<span class="badge ok">OK</span>{% else %}<span class="badge bad">FAIL</span>{% endif %}</td>
+                      <td class="font-mono text-xs text-slate-400">{{ t.duration_ms }} ms</td>
+                      <td class="text-xs text-slate-500">{{ t.error or "—" }}</td>
+                    </tr>
+                  {% endfor %}
+                  {% if not agent_trace %}
+                    <tr><td colspan="4" class="py-4 text-center text-slate-400">No trace.</td></tr>
+                  {% endif %}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </div>
+      {% endif %}
+
+      <!-- Stdout/stderr -->
+      {% if stderr %}
+        <div class="card">
+          <details open>
+            <summary class="cursor-pointer text-[14px] font-bold text-red-700 dark:text-red-400 list-none flex items-center gap-2">
+              <span data-lucide="terminal" class="h-4 w-4"></span> Stderr
+            </summary>
+            <pre class="mt-3 whitespace-pre-wrap rounded-xl bg-slate-950 px-4 py-3 text-xs text-red-300 overflow-auto max-h-64">{{ stderr }}</pre>
+          </details>
+        </div>
+      {% endif %}
+      {% if stdout %}
+        <div class="card">
+          <details>
+            <summary class="cursor-pointer text-[14px] font-bold text-slate-700 dark:text-slate-200 list-none flex items-center gap-2">
+              <span data-lucide="terminal" class="h-4 w-4 text-slate-400"></span> Stdout
+            </summary>
+            <pre class="mt-3 whitespace-pre-wrap rounded-xl bg-slate-950 px-4 py-3 text-xs text-slate-100 overflow-auto max-h-64">{{ stdout }}</pre>
+          </details>
+        </div>
+      {% endif %}
+
+    </div><!-- /right col -->
+  </div><!-- /grid -->
+</div>
 {% endblock %}

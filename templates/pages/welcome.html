@@ -2,68 +2,83 @@
 
 {% set hide_nav = true %}
 {% set auth_title = "Welcome to EduEval AI" %}
-{% set auth_subtitle = "The intelligent platform for automated coding assignment evaluation." %}
+{% set auth_subtitle = "The intelligent platform for automated coding assignment evaluation powered by LLaMA 3.3-70B." %}
 
 {% block auth_content %}
-  <div>
-    <!-- Header -->
-    <div class="mb-6 border-b border-slate-100 pb-5 dark:border-slate-800">
-      <div class="inline-flex items-center gap-2 rounded-full bg-brand-50 px-3 py-1 text-[11px] font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-300">
-        <span data-lucide="zap" class="h-3 w-3"></span>
-        Choose your portal
-      </div>
-      <h1 class="mt-3 text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white">Get Started</h1>
-      <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Sign in as a student to solve assignments, or as an instructor to create and manage them.</p>
+<div>
+  <!-- Header -->
+  <div class="mb-6 border-b border-slate-100 pb-5 dark:border-slate-800">
+    <div class="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-indigo-50 to-violet-50 border border-indigo-100 px-3 py-1 text-[11px] font-semibold text-indigo-700 dark:bg-indigo-500/10 dark:border-indigo-500/20 dark:text-indigo-300 mb-3">
+      <span class="relative flex h-2 w-2">
+        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-60"></span>
+        <span class="relative inline-flex h-2 w-2 rounded-full bg-indigo-500"></span>
+      </span>
+      Powered by Groq · LLaMA 3.3-70B
     </div>
+    <h1 class="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white">Get Started</h1>
+    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Submit code, get instant AI-powered feedback, track your progress.</p>
+  </div>
 
-    <!-- Portal cards -->
-    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-      <!-- Student card -->
-      <a href="/login?mode=student"
-         class="group relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 to-slate-100/60 p-5 hover:border-brand-300 hover:shadow-lg hover:shadow-brand-500/10 transition-all duration-200 dark:border-slate-700 dark:from-slate-800/60 dark:to-slate-800/30 dark:hover:border-brand-600 hover:-translate-y-0.5">
-        <div class="absolute inset-0 bg-gradient-to-br from-brand-500/0 via-brand-500/0 to-brand-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-        <div class="relative">
-          <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-md shadow-indigo-500/25 mb-4">
-            <span data-lucide="graduation-cap" class="h-5 w-5 text-white"></span>
-          </div>
-          <div class="font-bold text-slate-900 dark:text-white text-[15px]">Student</div>
-          <div class="mt-1 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Submit solutions, view reports, track your progress.</div>
-          <div class="mt-4 flex items-center gap-1.5 text-xs font-semibold text-brand-600 dark:text-brand-400">
-            Enter portal <span data-lucide="arrow-right" class="h-3.5 w-3.5 transition-transform group-hover:translate-x-1"></span>
-          </div>
+  <!-- Role cards -->
+  <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <!-- Student -->
+    <a href="/login?mode=student"
+       class="group relative overflow-hidden rounded-2xl border-2 border-transparent bg-gradient-to-br from-indigo-50 to-violet-50 p-5 hover:border-indigo-300 hover:shadow-xl hover:shadow-indigo-500/10 transition-all duration-200 dark:from-indigo-900/20 dark:to-violet-900/20 dark:hover:border-indigo-600 hover:-translate-y-1">
+      <div class="absolute inset-0 bg-gradient-to-br from-indigo-500/0 to-indigo-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-2xl"></div>
+      <div class="relative">
+        <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-lg shadow-indigo-500/30 mb-4">
+          <span data-lucide="graduation-cap" class="h-6 w-6 text-white"></span>
         </div>
-      </a>
-
-      <!-- Instructor card -->
-      <a href="/login?mode=instructor"
-         class="group relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 to-slate-100/60 p-5 hover:border-sky-300 hover:shadow-lg hover:shadow-sky-500/10 transition-all duration-200 dark:border-slate-700 dark:from-slate-800/60 dark:to-slate-800/30 dark:hover:border-sky-600 hover:-translate-y-0.5">
-        <div class="absolute inset-0 bg-gradient-to-br from-sky-500/0 via-sky-500/0 to-sky-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-        <div class="relative">
-          <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-cyan-600 shadow-md shadow-sky-500/25 mb-4">
-            <span data-lucide="badge-check" class="h-5 w-5 text-white"></span>
-          </div>
-          <div class="font-bold text-slate-900 dark:text-white text-[15px]">Instructor</div>
-          <div class="mt-1 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Create assignments, review submissions, view analytics.</div>
-          <div class="mt-4 flex items-center gap-1.5 text-xs font-semibold text-sky-600 dark:text-sky-400">
-            Enter portal <span data-lucide="arrow-right" class="h-3.5 w-3.5 transition-transform group-hover:translate-x-1"></span>
-          </div>
+        <div class="font-bold text-[15px] text-slate-900 dark:text-white">Student</div>
+        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Submit solutions · View AI feedback · Track scores</div>
+        <div class="mt-4 flex items-center gap-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400">
+          Enter portal <span data-lucide="arrow-right" class="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-1"></span>
         </div>
-      </a>
-    </div>
-
-    <!-- Register link -->
-    <div class="mt-4 flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 dark:bg-slate-800/50">
-      <div class="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
-        <span data-lucide="user-plus" class="h-4 w-4 text-slate-400"></span>
-        New here? Create a free student account.
       </div>
-      <a href="/register" class="btn btn-secondary btn-sm">Register</a>
-    </div>
+    </a>
 
-    <!-- Demo note -->
-    <div class="mt-4 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800/40 dark:bg-amber-900/20">
-      <span data-lucide="info" class="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5"></span>
-      <p class="text-xs text-amber-700 dark:text-amber-300">Demo mode: students use any username, instructors use the shared password.</p>
+    <!-- Instructor -->
+    <a href="/login?mode=instructor"
+       class="group relative overflow-hidden rounded-2xl border-2 border-transparent bg-gradient-to-br from-sky-50 to-cyan-50 p-5 hover:border-sky-300 hover:shadow-xl hover:shadow-sky-500/10 transition-all duration-200 dark:from-sky-900/20 dark:to-cyan-900/20 dark:hover:border-sky-600 hover:-translate-y-1">
+      <div class="absolute inset-0 bg-gradient-to-br from-sky-500/0 to-sky-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-2xl"></div>
+      <div class="relative">
+        <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-500 to-cyan-600 shadow-lg shadow-sky-500/30 mb-4">
+          <span data-lucide="badge-check" class="h-6 w-6 text-white"></span>
+        </div>
+        <div class="font-bold text-[15px] text-slate-900 dark:text-white">Instructor</div>
+        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Create assignments · Review submissions · Analytics</div>
+        <div class="mt-4 flex items-center gap-1.5 text-xs font-bold text-sky-600 dark:text-sky-400">
+          Enter portal <span data-lucide="arrow-right" class="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-1"></span>
+        </div>
+      </div>
+    </a>
+  </div>
+
+  <!-- Register link -->
+  <div class="mt-4 flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800">
+    <div class="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+      <span data-lucide="user-plus" class="h-4 w-4 text-slate-400"></span>
+      New here? Create a free account.
+    </div>
+    <a href="/register" class="btn btn-primary btn-sm">
+      <span data-lucide="sparkles" class="h-3.5 w-3.5"></span> Register
+    </a>
+  </div>
+
+  <!-- Feature pills -->
+  <div class="mt-4 flex flex-wrap gap-2">
+    <div class="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+      <span data-lucide="shield-check" class="h-3 w-3 text-emerald-500"></span> Sandboxed Tests
+    </div>
+    <div class="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+      <span data-lucide="bot" class="h-3 w-3 text-indigo-500"></span> AI Code Mentor
+    </div>
+    <div class="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+      <span data-lucide="trophy" class="h-3 w-3 text-amber-500"></span> Leaderboards
+    </div>
+    <div class="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+      <span data-lucide="code-2" class="h-3 w-3 text-sky-500"></span> 5 Languages
     </div>
   </div>
+</div>
 {% endblock %}
