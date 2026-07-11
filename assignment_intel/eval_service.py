@@ -124,6 +124,16 @@ def run_evaluation(
             error=error_msg,
             db_path=db_path,
         )
+
+        # ── CodeMentor ReAct Agent ──────────────────────────────────────
+        # Run AFTER score is saved so the student gets AI feedback in their
+        # report. Failures here are non-fatal — evaluation already completed.
+        if status == "completed":
+            _run_codementor_agent(
+                report_path=report_path,
+                stored=stored,
+                results=results,
+            )
     except Exception as exc:
         update_evaluation_finished(
             evaluation_id=evaluation_id,
@@ -135,3 +145,84 @@ def run_evaluation(
             error=str(exc),
             db_path=db_path,
         )
+
+
+def _run_codementor_agent(
+    *,
+    report_path: Path,
+    stored: StoredSubmission,
+    results: dict,
+) -> None:
+    """Run the CodeMentor ReAct Agent and inject ai_feedback into the report JSON.
+
+    Called automatically after every completed evaluation.
+    Failures are silently caught — the evaluation score is already saved.
+    """
+    import os
+
+    api_key = os.environ.get("GROQ_API_KEY", "").strip()
+    if not api_key:
+        return  # Agent disabled — no key configured
+
+    if not report_path or not report_path.exists():
+        return
+
+    try:
+        # Build the result dict the agent expects
+        result_payload: dict = {
+            "problem_id": stored.problem_id,
+            "language": stored.language,
+            "score": float(results.get("score", 0.0) or 0.0),
+            "passed_cases": int(results.get("passed_cases", 0) or 0),
+            "total_test_cases": int(results.get("total_test_cases", 0) or 0),
+            "case_results": results.get("case_results") or [],
+        }
+
+        student_code = ""
+        try:
+            student_code = Path(stored.path).read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            return  # No code to analyze
+
+        # Build ChromaDB store (fast, idempotent)
+        try:
+            from rag.problem_store import build_store
+            build_store()
+        except Exception:
+            pass  # Falls back to direct JSON read
+
+        from agents.codementor_agent import explain_failures
+        output = explain_failures(
+            problem_id=stored.problem_id,
+            student_code=student_code,
+            result=result_payload,
+            api_key=api_key,
+        )
+
+        ai_feedback = {
+            "explanation": output.explanation,
+            "likely_cause": output.likely_cause,
+            "root_cause": output.root_cause,
+            "why_hidden_fail": output.why_hidden_fail,
+            "hint": output.hint,
+            "confidence": output.confidence,
+            "tools_used": output.tools_used,
+            "reasoning_turns": output.reasoning_turns,
+        }
+
+        # Inject into the saved report JSON
+        report_data = json.loads(report_path.read_text(encoding="utf-8"))
+        if "analysis" not in report_data:
+            report_data["analysis"] = {}
+        report_data["analysis"]["ai_feedback"] = ai_feedback
+        report_path.write_text(json.dumps(report_data, indent=2), encoding="utf-8")
+
+        print(
+            f"[codementor] ai_feedback injected into {report_path.name} "
+            f"(confidence={output.confidence}, turns={output.reasoning_turns})",
+            flush=True,
+        )
+
+    except Exception as exc:
+        # Never crash the evaluation pipeline
+        print(f"[codementor] agent skipped: {exc}", flush=True)

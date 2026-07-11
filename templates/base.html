@@ -24,16 +24,28 @@
               },
               colors: {
                 brand: {
-                  50:  '#eef2ff',
-                  100: '#e0e7ff',
-                  200: '#c7d2fe',
-                  300: '#a5b4fc',
-                  400: '#818cf8',
-                  500: '#6366f1',
-                  600: '#4f46e5',
-                  700: '#4338ca',
-                  800: '#3730a3',
-                  900: '#312e81',
+                  50:  '#f0fdfb',
+                  100: '#ccfbf4',
+                  200: '#99f6e8',
+                  300: '#5eead4',
+                  400: '#2dd4bf',
+                  500: '#00b8a3',
+                  600: '#0d9488',
+                  700: '#0f766e',
+                  800: '#115e59',
+                  900: '#134e4a',
+                },
+                accent: {
+                  50:  '#fff7ed',
+                  100: '#ffedd5',
+                  200: '#fed7aa',
+                  300: '#fdba74',
+                  400: '#fb923c',
+                  500: '#ffa116',
+                  600: '#ea580c',
+                  700: '#c2410c',
+                  800: '#9a3412',
+                  900: '#7c2d12',
                 },
               },
               animation: {
@@ -67,31 +79,33 @@
     <style>
       /* ── Design tokens ─────────────────────────────────── */
       :root {
-        --brand:        #6366f1;
-        --brand-light:  #818cf8;
-        --brand-dark:   #4f46e5;
-        --success:      #10b981;
+        --brand:        #00b8a3;
+        --brand-light:  #2dd4bf;
+        --brand-dark:   #0d9488;
+        --accent:       #ffa116;
+        --accent-dark:  #ea580c;
+        --success:      #00b8a3;
         --error:        #ef4444;
-        --warning:      #f59e0b;
+        --warning:      #ffa116;
         --info:         #3b82f6;
         --surface:      #ffffff;
         --surface-2:    #f8fafc;
         --border:       rgba(226, 232, 240, 0.8);
         --text:         #0f172a;
         --text-muted:   #64748b;
-        --radius-card:  16px;
-        --radius-btn:   10px;
+        --radius-card:  12px;
+        --radius-btn:   8px;
         --shadow-card:  0 1px 3px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.04);
         --shadow-lg:    0 4px 6px rgba(0,0,0,.05), 0 10px 40px rgba(0,0,0,.08);
       }
       .dark {
-        --surface:      #1e293b;
-        --surface-2:    #0f172a;
-        --border:       rgba(51, 65, 85, 0.7);
-        --text:         #f1f5f9;
-        --text-muted:   #94a3b8;
-        --shadow-card:  0 1px 3px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.2);
-        --shadow-lg:    0 4px 6px rgba(0,0,0,.2), 0 10px 40px rgba(0,0,0,.3);
+        --surface:      #1a1a2e;
+        --surface-2:    #16213e;
+        --border:       rgba(255,255,255,0.07);
+        --text:         #e2e8f0;
+        --text-muted:   #64748b;
+        --shadow-card:  0 1px 3px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.3);
+        --shadow-lg:    0 4px 6px rgba(0,0,0,.3), 0 10px 40px rgba(0,0,0,.4);
       }
 
       /* ── Base ───────────────────────────────────────────── */
@@ -102,8 +116,8 @@
       /* ── Scrollbar ──────────────────────────────────────── */
       ::-webkit-scrollbar { width: 6px; height: 6px; }
       ::-webkit-scrollbar-track { background: transparent; }
-      ::-webkit-scrollbar-thumb { background: rgba(99,102,241,.3); border-radius: 99px; }
-      ::-webkit-scrollbar-thumb:hover { background: rgba(99,102,241,.55); }
+      ::-webkit-scrollbar-thumb { background: rgba(0,184,163,.35); border-radius: 99px; }
+      ::-webkit-scrollbar-thumb:hover { background: rgba(0,184,163,.6); }
 
       /* ── Card ───────────────────────────────────────────── */
       .card {

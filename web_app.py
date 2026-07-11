@@ -446,6 +446,27 @@ def _require_fastapi():
 
 FastAPI, File, Form, UploadFile, HTMLResponse, Request, RedirectResponse, JSONResponse = _require_fastapi()
 app = FastAPI(title="Assignment Intelligence Platform", version="0.1")
+
+# ── CORS — allows the React frontend (Vercel) to call this API ────────────
+try:
+    from fastapi.middleware.cors import CORSMiddleware
+    _frontend_origins = [
+        "http://localhost:5173",          # Vite dev server
+        "http://localhost:3000",          # alternate dev
+        "https://evaluator-engine.vercel.app",   # production Vercel
+    ]
+    # Also allow any *.vercel.app preview deploy
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_frontend_origins,
+        allow_origin_regex=r"https://.*\.vercel\.app",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+except Exception:
+    pass
+
 templates = None
 try:  # Optional: will be available after `pip install -r requirements.txt`
     from fastapi.templating import Jinja2Templates
@@ -2490,6 +2511,217 @@ def _start_background_worker() -> None:
     t = threading.Thread(target=_worker_loop, daemon=True, name="embedded-worker")
     t.start()
     print("[embedded-worker] thread launched", flush=True)
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  REST API  —  /api/*  routes for the React frontend
+#  All return JSON. The old Jinja2 HTML routes still work in parallel.
+# ═══════════════════════════════════════════════════════════════════
+
+@app.post("/api/auth/register")
+async def api_register(payload: dict):
+    from urllib.parse import quote
+    from assignment_intel.auth import hash_password, issue_session_token
+    from assignment_intel.db import count_users, create_user, get_user_by_email, get_user_by_username
+
+    u = (payload.get("username") or "").strip().lower()
+    e = (payload.get("email") or "").strip().lower()
+    pw = payload.get("password") or ""
+
+    if not u or not e or not pw:
+        return JSONResponse({"error": "username, email and password are required"}, status_code=400)
+    if get_user_by_username(u) or get_user_by_email(e):
+        return JSONResponse({"error": "User already exists"}, status_code=409)
+
+    role = "admin" if count_users() == 0 else "student"
+    try:
+        pw_hash = hash_password(pw)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+    uid = create_user(username=u, email=e, password_hash=pw_hash, phone=None, role=role)
+    token = issue_session_token(user_id=uid, username=u, role=role)
+    return JSONResponse({"token": token, "username": u, "role": role, "id": uid})
+
+
+@app.post("/api/auth/login")
+async def api_login(payload: dict):
+    from assignment_intel.auth import issue_session_token, verify_password
+    from assignment_intel.db import get_user_by_email, get_user_by_username
+
+    ident = (payload.get("username") or payload.get("identity") or "").strip().lower()
+    pw = payload.get("password") or ""
+    user = get_user_by_username(ident) or get_user_by_email(ident)
+    if not user or not verify_password(pw, str(user.get("password_hash") or "")):
+        return JSONResponse({"error": "Invalid credentials"}, status_code=401)
+
+    token = issue_session_token(
+        user_id=int(user["id"]),
+        username=str(user["username"]),
+        role=str(user["role"])
+    )
+    return JSONResponse({
+        "token": token,
+        "username": str(user["username"]),
+        "role": str(user["role"]),
+        "id": int(user["id"])
+    })
+
+
+@app.get("/api/me")
+async def api_me(request: Request):
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    from assignment_intel.db import list_evaluations_for_user
+    username = str(user.get("username") or "")
+    evals = list_evaluations_for_user(username=username, limit=20)
+    best: dict[str, float] = {}
+    subs = []
+    for ev in evals:
+        pid = str(ev.get("problem_id") or "")
+        sc = float(ev.get("score") or 0.0)
+        if pid not in best or sc > best[pid]:
+            best[pid] = sc
+        subs.append({
+            "evaluation_id": str(ev.get("evaluation_id") or ""),
+            "problem_id": pid,
+            "language": str(ev.get("language") or ""),
+            "status": str(ev.get("status") or ""),
+            "score": sc,
+            "report_path": str(ev.get("report_path") or "") if ev.get("report_path") else None,
+        })
+    return JSONResponse({
+        "username": user.get("username"),
+        "role": user.get("role"),
+        "best_scores": [{"problem_id": k, "score": v} for k, v in best.items()],
+        "submissions": subs,
+    })
+
+
+@app.get("/api/assignments")
+async def api_assignments():
+    from assignment_intel.db import list_student_assignments
+    rows = list_student_assignments()
+    return JSONResponse({"assignments": [dict(r) for r in rows]})
+
+
+@app.get("/api/assignment/{assignment_id}")
+async def api_assignment(assignment_id: str):
+    from assignment_intel.db import get_assignment, list_test_cases
+    a = get_assignment(assignment_id=assignment_id)
+    if not a:
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    cases = list_test_cases(assignment_id=assignment_id)
+    visible = [
+        {"id": c.get("id"), "input": c.get("input_text"), "expected": c.get("expected_output")}
+        for c in cases if str(c.get("visibility")) == "visible"
+    ]
+    try:
+        tags = json.loads(a.get("tags_json") or "[]")
+    except Exception:
+        tags = []
+    try:
+        examples = json.loads(a.get("examples_json") or "[]")
+    except Exception:
+        examples = []
+    return JSONResponse({
+        "id": str(a.get("id") or ""),
+        "title": str(a.get("title") or ""),
+        "description": str(a.get("generated_description") or a.get("description") or ""),
+        "difficulty": str(a.get("difficulty") or ""),
+        "constraints": str(a.get("constraints_text") or ""),
+        "input_format": str(a.get("input_format") or ""),
+        "output_format": str(a.get("output_format") or ""),
+        "tags": tags,
+        "examples": examples,
+        "visible_tests": int(a.get("visible_tests") or 0),
+        "hidden_tests": int(a.get("hidden_tests") or 0),
+        "active": bool(a.get("active")),
+        "visible_cases": visible,
+    })
+
+
+@app.post("/api/submit")
+async def api_submit(request: Request, problem_id: str = Form(...), file: UploadFile = File(...)):
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    username = str(user.get("username") or "")
+    try:
+        content = await file.read()
+        stored = save_submission_bytes(
+            student_name=username,
+            problem_id=problem_id,
+            filename=file.filename or "submission.py",
+            content=content,
+        )
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+    from assignment_intel.eval_service import enqueue_only
+    from assignment_intel.db import enqueue_job
+    evaluation_id = enqueue_only(stored=stored, student_name=username)
+    job_id = enqueue_job(job_type="solution_evaluation", payload={"evaluation_id": evaluation_id})
+    return JSONResponse({
+        "evaluation_id": evaluation_id,
+        "job_id": job_id,
+        "problem_id": stored.problem_id,
+        "language": stored.language,
+    })
+
+
+@app.get("/api/evaluation/{evaluation_id}")
+async def api_evaluation(evaluation_id: int, request: Request):
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    from assignment_intel.db import get_evaluation, get_submission
+    ev = get_evaluation(evaluation_id)
+    if not ev:
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    sub = get_submission(ev.submission_id)
+    return JSONResponse({
+        "id": ev.id,
+        "status": str(ev.status),
+        "score": float(ev.score or 0),
+        "error": str(ev.error or ""),
+        "problem_id": str(sub.get("problem_id") or "") if sub else "",
+        "language": str(sub.get("language") or "") if sub else "",
+        "report_path": str(ev.report_path) if ev.report_path else None,
+    })
+
+
+@app.get("/api/report/{evaluation_id}")
+async def api_report(evaluation_id: int, request: Request):
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    from assignment_intel.db import get_evaluation, get_submission
+    ev = get_evaluation(evaluation_id)
+    if not ev or not ev.report_path:
+        return JSONResponse({"error": "Report not found"}, status_code=404)
+    rp = Path(str(ev.report_path))
+    if not rp.exists():
+        return JSONResponse({"error": "Report file missing"}, status_code=404)
+    try:
+        data = json.loads(rp.read_text(encoding="utf-8"))
+    except Exception:
+        return JSONResponse({"error": "Could not read report"}, status_code=500)
+    return JSONResponse(data)
+
+
+@app.get("/api/leaderboard/{assignment_id}")
+async def api_leaderboard(assignment_id: str):
+    from assignment_intel.db import get_leaderboard
+    rows = get_leaderboard(assignment_id=assignment_id, limit=50)
+    return JSONResponse({"assignment_id": assignment_id, "rows": [dict(r) for r in rows]})
+
+
+@app.get("/api/health")
+async def api_health():
+    return JSONResponse({"status": "ok", "service": "evaluator-engine"})
 
 
 def main() -> None:
