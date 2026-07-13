@@ -1,3 +1,4 @@
+// Points to Render backend in production, proxied locally via vite.config.js
 const BASE = import.meta.env.VITE_API_URL || ''
 
 function getToken() {
@@ -8,7 +9,7 @@ async function req(method, path, body, isForm = false) {
   const headers = {}
   const token = getToken()
   if (token) headers['Authorization'] = `Bearer ${token}`
-  if (!isForm) headers['Content-Type'] = 'application/json'
+  if (!isForm && body) headers['Content-Type'] = 'application/json'
 
   const res = await fetch(`${BASE}${path}`, {
     method,
@@ -41,4 +42,7 @@ export const api = {
 
   // Leaderboard
   leaderboard: (id) => req('GET', `/api/leaderboard/${id}`),
+
+  // Health
+  health: () => req('GET', '/api/health'),
 }

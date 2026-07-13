@@ -82,7 +82,16 @@ def _current_user(request: "Request") -> dict[str, Any] | None:
         from assignment_intel.auth import decode_session_token
         from assignment_intel.db import get_user_by_id
 
-        token = request.cookies.get("session")
+        # 1. Try Bearer token from Authorization header (React frontend)
+        auth_header = request.headers.get("Authorization", "")
+        token = None
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:].strip()
+
+        # 2. Fall back to cookie (Jinja2 frontend)
+        if not token:
+            token = request.cookies.get("session")
+
         if not token:
             return None
         payload = decode_session_token(token)
@@ -451,11 +460,12 @@ app = FastAPI(title="Assignment Intelligence Platform", version="0.1")
 try:
     from fastapi.middleware.cors import CORSMiddleware
     _frontend_origins = [
-        "http://localhost:5173",          # Vite dev server
-        "http://localhost:3000",          # alternate dev
-        "https://evaluator-engine.vercel.app",   # production Vercel
+        "http://localhost:5173",                        # Vite dev
+        "http://localhost:3000",                        # alternate dev
+        "https://evaluator-engine.vercel.app",          # Vercel production
+        "https://evaluator-engine-web.onrender.com",    # Render (same-origin calls)
     ]
-    # Also allow any *.vercel.app preview deploy
+    # Also allow any *.vercel.app preview deploy (covers all Vercel preview URLs)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_frontend_origins,
