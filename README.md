@@ -1,7 +1,7 @@
 # Automated Student Assignment Evaluation System
 
 A Python project scaffold for evaluating student assignment submissions using predefined pytest test cases.
-
+ 
 ## Project Structure
 
 ```text
