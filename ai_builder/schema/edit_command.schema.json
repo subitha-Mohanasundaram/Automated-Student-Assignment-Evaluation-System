@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AI Workflow Builder — Edit Command Schema",
+  "description": "Structured natural language edit commands for the AI Workflow Builder",
+  "type": "object",
+  "properties": {
+    "command": { "type": "string", "enum": ["move_node","replace_plugin","add_node","remove_node","add_retry","add_condition","add_parallel","add_delay","set_timeout","rename_node","connect_nodes","update_params","wrap_in_loop","enable_node","disable_node","set_variable"] },
+    "args": { "type": "object" },
+    "explanation": { "type": "string" },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+  }
+}

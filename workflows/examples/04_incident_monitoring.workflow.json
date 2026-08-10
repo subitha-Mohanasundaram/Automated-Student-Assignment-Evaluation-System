@@ -1,0 +1,628 @@
+{
+  "$schema": "../schema/workflow.schema.json",
+  "schema_version": "1.0",
+  "workflow_id": "incident_monitoring",
+  "name": "Incident Monitoring & Response",
+  "description": "End-to-end incident lifecycle automation. Monitors system health via API polling, detects anomalies with AI, auto-triages, triggers parallel alerts across channels, escalates via PagerDuty, requires human approval for production rollbacks, and performs auto-remediation with retry/compensation.",
+  "version": "3.0.0",
+
+  "changelog": [
+    {
+      "version": "3.0.0",
+      "date": "2026-08-05",
+      "author": "sre-team",
+      "summary": "Added AI anomaly detection, saga compensation, and multi-tier escalation",
+      "breaking": true
+    },
+    {
+      "version": "2.0.0",
+      "date": "2026-06-01",
+      "author": "sre-team",
+      "summary": "Added PagerDuty integration and runbook execution"
+    },
+    {
+      "version": "1.0.0",
+      "date": "2026-01-01",
+      "author": "sre-team",
+      "summary": "Initial alert → Slack pipeline"
+    }
+  ],
+
+  "metadata": {
+    "owner": "sre@myorg.com",
+    "team": "site-reliability",
+    "project": "platform-observability",
+    "labels": {
+      "env": "production",
+      "category": "incident-management",
+      "criticality": "p0"
+    },
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-08-05T12:00:00Z",
+    "category": "Observability",
+    "compliance_tags": ["SOC2", "ISO27001"]
+  },
+
+  "settings": {
+    "max_concurrent_runs": 50,
+    "concurrency_key": "{{trigger.service}}_{{trigger.environment}}",
+    "timeout": "PT2H",
+    "timezone": "UTC",
+    "execution_mode": "dag",
+    "logging": {
+      "level": "debug",
+      "sensitive_fields": ["api_key", "db_password"]
+    }
+  },
+
+  "secrets": [
+    { "name": "PAGERDUTY_API_KEY",   "source": "vault", "key": "pagerduty/api-key" },
+    { "name": "SLACK_BOT_TOKEN",     "source": "vault", "key": "slack/bot-token" },
+    { "name": "OPENAI_API_KEY",      "source": "env",   "key": "OPENAI_API_KEY" },
+    { "name": "METRICS_API_KEY",     "source": "vault", "key": "metrics/api-key" },
+    { "name": "KUBECTL_TOKEN",       "source": "vault", "key": "k8s/deploy-token" }
+  ],
+
+  "variables": [
+    { "name": "service",           "type": "string" },
+    { "name": "environment",       "type": "string",  "default": "production" },
+    { "name": "alert_name",        "type": "string" },
+    { "name": "alert_description", "type": "string" },
+    { "name": "severity",          "type": "string",  "default": "unknown" },
+    { "name": "metrics_snapshot",  "type": "object" },
+    { "name": "recent_logs",       "type": "array" },
+    { "name": "ai_analysis",       "type": "object" },
+    { "name": "incident_id",       "type": "string" },
+    { "name": "pagerduty_id",      "type": "string" },
+    { "name": "remediation_plan",  "type": "object" },
+    { "name": "rollback_approved", "type": "boolean", "default": false },
+    { "name": "remediation_result","type": "object" },
+    { "name": "postmortem",        "type": "string" },
+    { "name": "alert_source",      "type": "string" },
+    { "name": "runbook_url",       "type": "string" },
+    { "name": "on_call_engineer",  "type": "string" }
+  ],
+
+  "triggers": [
+    {
+      "id": "prometheus_alert",
+      "type": "webhook",
+      "name": "Prometheus Alertmanager Webhook",
+      "enabled": true,
+      "config": {
+        "path": "/webhooks/alertmanager",
+        "accepted_events": ["firing"]
+      },
+      "filters": [
+        { "expression": "$.body.status == 'firing'" }
+      ],
+      "input_mapping": {
+        "alert_name":        "$.body.alerts[0].labels.alertname",
+        "service":           "$.body.alerts[0].labels.service",
+        "environment":       "$.body.alerts[0].labels.env",
+        "severity":          "$.body.alerts[0].labels.severity",
+        "alert_description": "$.body.alerts[0].annotations.description",
+        "alert_source":      "prometheus",
+        "runbook_url":       "$.body.alerts[0].annotations.runbook_url"
+      }
+    },
+    {
+      "id": "health_check_cron",
+      "type": "cron",
+      "name": "Proactive Health Check",
+      "enabled": true,
+      "config": {
+        "expression": "*/2 * * * *",
+        "description": "Every 2 minutes"
+      },
+      "input_mapping": {
+        "alert_source": "cron_health_check"
+      }
+    },
+    {
+      "id": "datadog_webhook",
+      "type": "webhook",
+      "name": "Datadog Alert Webhook",
+      "enabled": true,
+      "config": {
+        "path": "/webhooks/datadog"
+      },
+      "input_mapping": {
+        "alert_name":   "$.body.title",
+        "service":      "$.body.tags.service",
+        "severity":     "$.body.priority",
+        "alert_source": "datadog"
+      }
+    }
+  ],
+
+  "nodes": [
+    {
+      "id": "collect_metrics",
+      "type": "parallel",
+      "name": "Parallel: Collect Metrics + Logs",
+      "depends_on": [],
+      "parallel": {
+        "branches": [
+          {
+            "id": "metrics_branch",
+            "name": "Fetch Metrics",
+            "node_ids": ["fetch_metrics"]
+          },
+          {
+            "id": "logs_branch",
+            "name": "Fetch Recent Logs",
+            "node_ids": ["fetch_logs"]
+          },
+          {
+            "id": "on_call_branch",
+            "name": "Fetch On-Call Engineer",
+            "node_ids": ["fetch_on_call"]
+          }
+        ],
+        "join_mode": "all",
+        "max_concurrency": 3
+      }
+    },
+
+    {
+      "id": "fetch_metrics",
+      "type": "webhook",
+      "name": "Fetch Prometheus Metrics Snapshot",
+      "depends_on": ["collect_metrics"],
+      "webhook": {
+        "url": "https://prometheus.myorg.com/api/v1/query_range",
+        "method": "GET",
+        "headers": { "Authorization": "Bearer {{$secret.METRICS_API_KEY}}" },
+        "body": {
+          "query": "up{service='{{service}}', env='{{environment}}'}",
+          "start": "{{$now | minus: 1800}}",
+          "end": "{{$now}}",
+          "step": "30"
+        },
+        "expected_status_codes": [200],
+        "response_mapping": {
+          "metrics_snapshot": "$.body.data"
+        }
+      },
+      "retry": { "max_attempts": 3, "initial_delay": "PT2S", "backoff_strategy": "exponential" },
+      "timeout": { "duration": "PT20S", "on_timeout": "skip" }
+    },
+
+    {
+      "id": "fetch_logs",
+      "type": "webhook",
+      "name": "Fetch Recent Error Logs",
+      "depends_on": ["collect_metrics"],
+      "webhook": {
+        "url": "https://logs.myorg.com/api/v1/query",
+        "method": "POST",
+        "headers": { "Authorization": "Bearer {{$secret.METRICS_API_KEY}}" },
+        "body": {
+          "service": "{{service}}",
+          "level":   "error",
+          "limit":   50,
+          "since":   "30m"
+        },
+        "expected_status_codes": [200],
+        "response_mapping": {
+          "recent_logs": "$.body.logs"
+        }
+      },
+      "retry": { "max_attempts": 2, "initial_delay": "PT3S", "backoff_strategy": "fixed" }
+    },
+
+    {
+      "id": "fetch_on_call",
+      "type": "webhook",
+      "name": "Fetch On-Call Engineer from PagerDuty",
+      "depends_on": ["collect_metrics"],
+      "webhook": {
+        "url": "https://api.pagerduty.com/oncalls",
+        "method": "GET",
+        "headers": {
+          "Authorization": "Token token={{$secret.PAGERDUTY_API_KEY}}",
+          "Accept": "application/vnd.pagerduty+json;version=2"
+        },
+        "body": { "escalation_policy_ids[]": "P1234AB" },
+        "expected_status_codes": [200],
+        "response_mapping": {
+          "on_call_engineer": "$.body.oncalls[0].user.email"
+        }
+      }
+    },
+
+    {
+      "id": "ai_analyze_incident",
+      "type": "ai",
+      "name": "AI — Analyze Incident Root Cause",
+      "depends_on": ["fetch_metrics", "fetch_logs", "fetch_on_call"],
+      "ai": {
+        "provider": "openai",
+        "model": "gpt-4o",
+        "system_prompt": "You are an expert SRE AI assistant. Analyze incidents accurately and provide actionable remediation.",
+        "prompt": "Analyze this production incident:\n\nService: {{service}} (env: {{environment}})\nAlert: {{alert_name}}\nDescription: {{alert_description}}\nSeverity: {{severity}}\nRunbook: {{runbook_url}}\n\nMetrics snapshot:\n{{metrics_snapshot}}\n\nRecent error logs (last 30m):\n{{recent_logs}}\n\nProvide analysis as JSON with:\n- root_cause: likely root cause (1-2 sentences)\n- impact: user-facing impact description\n- severity_confirmed: critical|high|medium|low\n- remediation_steps: array of {step, action, risk_level}\n- needs_rollback: true|false\n- estimated_resolution_time: duration string (e.g. '10 minutes')\n- confidence: 0-100",
+        "temperature": 0.1,
+        "response_format": "json"
+      },
+      "timeout": { "duration": "PT90S", "on_timeout": "fallback", "fallback_node_id": "ai_analysis_fallback" },
+      "retry": { "max_attempts": 2, "initial_delay": "PT5S", "backoff_strategy": "fixed" },
+      "outputs": {
+        "ai_analysis": "${ai_analyze_incident.result}",
+        "severity":    "${ai_analyze_incident.result.severity_confirmed}"
+      }
+    },
+
+    {
+      "id": "ai_analysis_fallback",
+      "type": "transform",
+      "name": "Default Analysis (AI Unavailable)",
+      "transform": {
+        "mappings": [
+          {
+            "target": "${ai_analysis}",
+            "value": {
+              "root_cause": "Unable to determine automatically. Manual investigation required.",
+              "severity_confirmed": "{{severity}}",
+              "needs_rollback": false,
+              "confidence": 0
+            }
+          }
+        ]
+      }
+    },
+
+    {
+      "id": "create_incident",
+      "type": "action",
+      "name": "Create Incident Record",
+      "depends_on": ["ai_analyze_incident", "ai_analysis_fallback"],
+      "action": {
+        "integration": "platform.db",
+        "operation": "insert",
+        "params": {
+          "table": "incidents",
+          "data": {
+            "service":      "{{service}}",
+            "environment":  "{{environment}}",
+            "alert_name":   "{{alert_name}}",
+            "severity":     "{{ai_analysis.severity_confirmed}}",
+            "root_cause":   "{{ai_analysis.root_cause}}",
+            "status":       "investigating",
+            "created_at":   "{{$now}}"
+          }
+        }
+      },
+      "outputs": {
+        "incident_id": "${create_incident.result.id}"
+      }
+    },
+
+    {
+      "id": "alert_parallel",
+      "type": "parallel",
+      "name": "Parallel: Alert All Channels",
+      "depends_on": ["create_incident"],
+      "parallel": {
+        "branches": [
+          {
+            "id": "slack_alert_branch",
+            "name": "Slack Alert",
+            "node_ids": ["notify_slack"]
+          },
+          {
+            "id": "pagerduty_branch",
+            "name": "PagerDuty Incident",
+            "node_ids": ["create_pagerduty_incident"]
+          },
+          {
+            "id": "email_branch",
+            "name": "Email On-Call",
+            "node_ids": ["email_on_call"]
+          }
+        ],
+        "join_mode": "all"
+      }
+    },
+
+    {
+      "id": "notify_slack",
+      "type": "notification",
+      "name": "Alert Slack #incidents",
+      "depends_on": ["alert_parallel"],
+      "notification": {
+        "targets": [
+          {
+            "channel": "slack",
+            "to": "#incidents",
+            "subject": "🚨 INCIDENT: {{alert_name}}",
+            "body": "🚨 *INCIDENT DETECTED* (ID: {{incident_id}})\n\n*Service:* `{{service}}` | *Env:* `{{environment}}`\n*Alert:* {{alert_name}}\n*Severity:* {{ai_analysis.severity_confirmed | upcase}}\n\n*Root Cause:* {{ai_analysis.root_cause}}\n*Impact:* {{ai_analysis.impact}}\n*ETA:* {{ai_analysis.estimated_resolution_time}}\n\n<{{runbook_url}}|📖 Runbook> | On-Call: {{on_call_engineer}}\nAI Confidence: {{ai_analysis.confidence}}%",
+            "severity": "critical"
+          }
+        ]
+      }
+    },
+
+    {
+      "id": "create_pagerduty_incident",
+      "type": "webhook",
+      "name": "Create PagerDuty Incident",
+      "depends_on": ["alert_parallel"],
+      "webhook": {
+        "url": "https://api.pagerduty.com/incidents",
+        "method": "POST",
+        "headers": {
+          "Authorization": "Token token={{$secret.PAGERDUTY_API_KEY}}",
+          "Accept": "application/vnd.pagerduty+json;version=2",
+          "From": "sre@myorg.com"
+        },
+        "body": {
+          "incident": {
+            "type": "incident",
+            "title": "{{alert_name}} — {{service}} ({{environment}})",
+            "urgency": "{{ai_analysis.severity_confirmed == 'critical' ? 'high' : 'low'}}",
+            "body": { "type": "incident_body", "details": "{{ai_analysis.root_cause}}" },
+            "service": { "id": "P1234AB", "type": "service_reference" }
+          }
+        },
+        "expected_status_codes": [201],
+        "response_mapping": {
+          "pagerduty_id": "$.body.incident.id"
+        }
+      },
+      "retry": {
+        "max_attempts": 5,
+        "backoff_strategy": "exponential",
+        "initial_delay": "PT2S",
+        "max_delay": "PT30S"
+      }
+    },
+
+    {
+      "id": "email_on_call",
+      "type": "notification",
+      "name": "Email On-Call Engineer",
+      "depends_on": ["alert_parallel"],
+      "notification": {
+        "targets": [
+          {
+            "channel": "email",
+            "to": "{{on_call_engineer}}",
+            "subject": "🚨 [ACTION REQUIRED] Incident {{incident_id}}: {{alert_name}}",
+            "body": "Hi,\n\nYou are on-call and there is an active production incident.\n\nIncident ID: {{incident_id}}\nService: {{service}} ({{environment}})\nAlert: {{alert_name}}\nSeverity: {{ai_analysis.severity_confirmed}}\n\nRoot Cause: {{ai_analysis.root_cause}}\nImpact: {{ai_analysis.impact}}\n\nRunbook: {{runbook_url}}\n\nPlease take action immediately.",
+            "severity": "critical"
+          }
+        ]
+      }
+    },
+
+    {
+      "id": "rollback_gate",
+      "type": "condition",
+      "name": "Needs Rollback?",
+      "depends_on": ["notify_slack", "create_pagerduty_incident", "email_on_call"],
+      "condition_node": {
+        "expression": "${ai_analysis.needs_rollback} && ${environment} == 'production'",
+        "branches": [
+          { "case": "true",  "next": "rollback_approval" },
+          { "case": "false", "next": "auto_remediate" }
+        ]
+      }
+    },
+
+    {
+      "id": "rollback_approval",
+      "type": "human_approval",
+      "name": "Approve Production Rollback",
+      "depends_on": ["rollback_gate"],
+      "human_approval": {
+        "approvers": ["{{on_call_engineer}}", "sre-lead@myorg.com"],
+        "approval_mode": "any",
+        "instructions": "The AI has recommended a production rollback. Please review the incident details and approve or reject.",
+        "data_to_review": {
+          "Incident ID":   "{{incident_id}}",
+          "Service":       "{{service}}",
+          "Root Cause":    "{{ai_analysis.root_cause}}",
+          "Impact":        "{{ai_analysis.impact}}",
+          "AI Confidence": "{{ai_analysis.confidence}}%",
+          "Remediation":   "{{ai_analysis.remediation_steps}}"
+        },
+        "expiry": "PT15M",
+        "on_expiry": "auto_reject",
+        "escalation_approvers": ["cto@myorg.com"],
+        "channels": ["slack", "email"]
+      },
+      "outputs": {
+        "rollback_approved": "${rollback_approval.result.approved}"
+      }
+    },
+
+    {
+      "id": "auto_remediate",
+      "type": "action",
+      "name": "Auto-Remediate (Rolling Restart)",
+      "depends_on": ["rollback_gate", "rollback_approval"],
+      "condition": {
+        "logic": "OR",
+        "rules": [
+          { "expression": "!${ai_analysis.needs_rollback}" },
+          { "expression": "${rollback_approved} == true" }
+        ]
+      },
+      "action": {
+        "integration": "kubernetes",
+        "operation": "rollout_restart",
+        "auth": "KUBECTL_TOKEN",
+        "params": {
+          "namespace":   "{{environment}}",
+          "deployment":  "{{service}}",
+          "strategy":    "{{ai_analysis.needs_rollback ? 'rollback' : 'rolling_restart'}}"
+        }
+      },
+      "retry": {
+        "max_attempts": 3,
+        "initial_delay": "PT10S",
+        "backoff_strategy": "exponential",
+        "abort_on": ["AuthorizationError", "ClusterNotFound"]
+      },
+      "timeout": { "duration": "PT5M", "on_timeout": "escalate" },
+      "error_handler": {
+        "on_error": "compensate",
+        "compensation_node_id": "compensate_failed_remediation",
+        "capture_error_to": "${remediation_error}",
+        "notify": [
+          {
+            "channel": "slack",
+            "to": "#incidents",
+            "body": "❌ Auto-remediation failed for {{service}}: {{$error.message}}",
+            "severity": "critical"
+          }
+        ]
+      },
+      "outputs": {
+        "remediation_result": "${auto_remediate.result}"
+      }
+    },
+
+    {
+      "id": "compensate_failed_remediation",
+      "type": "notification",
+      "name": "Compensate: Escalate Failed Remediation",
+      "notification": {
+        "targets": [
+          {
+            "channel": "pagerduty",
+            "to": "P1234AB",
+            "body": "CRITICAL: Auto-remediation failed for {{service}} in {{environment}}. Manual intervention required immediately.",
+            "severity": "critical"
+          },
+          {
+            "channel": "slack",
+            "to": "#on-call-escalations",
+            "body": "🆘 *ESCALATION*: Remediation failed for `{{service}}`. PagerDuty: {{pagerduty_id}}. Manual action needed NOW.",
+            "severity": "critical"
+          }
+        ]
+      }
+    },
+
+    {
+      "id": "verify_recovery",
+      "type": "action",
+      "name": "Verify Service Recovery",
+      "depends_on": ["auto_remediate"],
+      "delay": "PT2M",
+      "action": {
+        "integration": "platform.health_check",
+        "operation": "check",
+        "params": {
+          "service":     "{{service}}",
+          "environment": "{{environment}}",
+          "timeout":     "PT30S"
+        }
+      },
+      "retry": {
+        "max_attempts": 5,
+        "initial_delay": "PT30S",
+        "backoff_strategy": "fixed",
+        "retry_on": ["ServiceUnhealthy"]
+      },
+      "outputs": {
+        "service_healthy": "${verify_recovery.result.healthy}"
+      }
+    },
+
+    {
+      "id": "close_incident",
+      "type": "action",
+      "name": "Close Incident Record",
+      "depends_on": ["verify_recovery"],
+      "condition": { "expression": "${service_healthy}" },
+      "action": {
+        "integration": "platform.db",
+        "operation": "update",
+        "params": {
+          "table":  "incidents",
+          "id":     "{{incident_id}}",
+          "data":   { "status": "resolved", "resolved_at": "{{$now}}" }
+        }
+      }
+    },
+
+    {
+      "id": "close_pagerduty",
+      "type": "webhook",
+      "name": "Resolve PagerDuty Incident",
+      "depends_on": ["close_incident"],
+      "webhook": {
+        "url": "https://api.pagerduty.com/incidents/{{pagerduty_id}}",
+        "method": "PUT",
+        "headers": {
+          "Authorization": "Token token={{$secret.PAGERDUTY_API_KEY}}",
+          "Accept": "application/vnd.pagerduty+json;version=2",
+          "From": "sre@myorg.com"
+        },
+        "body": {
+          "incident": { "type": "incident", "status": "resolved" }
+        },
+        "expected_status_codes": [200]
+      }
+    },
+
+    {
+      "id": "ai_postmortem",
+      "type": "ai",
+      "name": "AI — Generate Postmortem Draft",
+      "depends_on": ["close_incident"],
+      "ai": {
+        "provider": "openai",
+        "model": "gpt-4o",
+        "system_prompt": "You are a technical writer specializing in incident postmortems. Use the blameless postmortem format.",
+        "prompt": "Generate a blameless postmortem for this incident:\n\nService: {{service}} ({{environment}})\nIncident ID: {{incident_id}}\nAlert: {{alert_name}}\nRoot Cause: {{ai_analysis.root_cause}}\nImpact: {{ai_analysis.impact}}\nRemediation taken: {{remediation_result}}\n\nFormat as markdown with sections: Summary, Timeline, Root Cause, Impact, Resolution, Action Items, Lessons Learned.",
+        "temperature": 0.4,
+        "response_format": "markdown"
+      },
+      "outputs": {
+        "postmortem": "${ai_postmortem.result}"
+      }
+    },
+
+    {
+      "id": "notify_resolution",
+      "type": "notification",
+      "name": "Notify Resolution",
+      "depends_on": ["close_pagerduty", "ai_postmortem"],
+      "notification": {
+        "targets": [
+          {
+            "channel": "slack",
+            "to": "#incidents",
+            "body": "✅ *RESOLVED* Incident {{incident_id}} for `{{service}}` is resolved.\n\nRCA: {{ai_analysis.root_cause}}\nPostmortem draft sent to #postmortems.",
+            "severity": "info"
+          },
+          {
+            "channel": "slack",
+            "to": "#postmortems",
+            "body": "📋 *Postmortem Draft* — Incident {{incident_id}} (`{{service}}`)\n\n{{postmortem}}",
+            "severity": "info"
+          }
+        ]
+      }
+    }
+  ],
+
+  "on_failure": [
+    {
+      "channel": "pagerduty",
+      "to": "P1234AB",
+      "body": "CRITICAL: Incident workflow itself failed for {{service}}: {{$error.message}}",
+      "severity": "critical"
+    },
+    {
+      "channel": "slack",
+      "to": "#platform-alerts",
+      "body": "❌ Incident workflow failed: {{$error.message}} | Incident: {{incident_id}}",
+      "severity": "critical"
+    }
+  ]
+}

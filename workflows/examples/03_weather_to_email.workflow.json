@@ -1,0 +1,300 @@
+{
+  "$schema": "../schema/workflow.schema.json",
+  "schema_version": "1.0",
+  "workflow_id": "weather_to_email",
+  "name": "Weather → Email",
+  "description": "Runs on a cron schedule, fetches weather data for configured cities, uses AI to generate a personalized briefing, and delivers it via email. Supports location-based routing, severe weather alerts, and weekly summaries.",
+  "version": "1.1.0",
+
+  "changelog": [
+    {
+      "version": "1.1.0",
+      "date": "2026-08-05",
+      "author": "automation-team",
+      "summary": "Added AI briefing, loop over multiple cities, severe weather parallel alerts"
+    },
+    {
+      "version": "1.0.0",
+      "date": "2026-04-01",
+      "author": "automation-team",
+      "summary": "Basic daily weather email"
+    }
+  ],
+
+  "metadata": {
+    "owner": "notifications@myorg.com",
+    "team": "platform",
+    "project": "daily-briefings",
+    "labels": { "env": "production", "category": "notification" },
+    "created_at": "2026-04-01T00:00:00Z",
+    "updated_at": "2026-08-05T12:00:00Z",
+    "category": "Scheduled Reports"
+  },
+
+  "settings": {
+    "max_concurrent_runs": 1,
+    "timeout": "PT10M",
+    "timezone": "Asia/Kolkata",
+    "execution_mode": "dag",
+    "logging": { "level": "info" }
+  },
+
+  "secrets": [
+    { "name": "OPENWEATHER_API_KEY", "source": "env",   "key": "OPENWEATHER_API_KEY" },
+    { "name": "OPENAI_API_KEY",      "source": "env",   "key": "OPENAI_API_KEY" },
+    { "name": "SMTP_HOST",           "source": "env",   "key": "SMTP_HOST" },
+    { "name": "SMTP_PASSWORD",       "source": "vault", "key": "smtp/password" }
+  ],
+
+  "variables": [
+    {
+      "name": "cities",
+      "type": "array",
+      "default": [
+        { "name": "Chennai",   "lat": 13.0827, "lon": 80.2707, "subscribers": ["student@college.edu"] },
+        { "name": "Mumbai",    "lat": 19.0760, "lon": 72.8777, "subscribers": ["team@myorg.com"] },
+        { "name": "Bangalore", "lat": 12.9716, "lon": 77.5946, "subscribers": ["admin@myorg.com"] }
+      ]
+    },
+    { "name": "current_city",       "type": "object" },
+    { "name": "weather_data",       "type": "object" },
+    { "name": "forecast_data",      "type": "object" },
+    { "name": "ai_briefing",        "type": "string" },
+    { "name": "has_severe_weather", "type": "boolean", "default": false },
+    { "name": "alert_message",      "type": "string" },
+    { "name": "is_weekly_summary",  "type": "boolean", "default": false },
+    { "name": "report_date",        "type": "string" }
+  ],
+
+  "triggers": [
+    {
+      "id": "daily_cron",
+      "type": "cron",
+      "name": "Daily Morning Weather Brief",
+      "enabled": true,
+      "config": {
+        "expression": "0 6 * * *",
+        "description": "Every day at 6:00 AM IST"
+      },
+      "input_mapping": {
+        "is_weekly_summary": "false",
+        "report_date": "{{$now | date: '%Y-%m-%d'}}"
+      }
+    },
+    {
+      "id": "weekly_cron",
+      "type": "cron",
+      "name": "Weekly Weather Summary (Monday)",
+      "enabled": true,
+      "config": {
+        "expression": "0 7 * * 1",
+        "description": "Every Monday at 7:00 AM IST"
+      },
+      "input_mapping": {
+        "is_weekly_summary": "true",
+        "report_date": "{{$now | date: '%Y-%m-%d'}}"
+      }
+    }
+  ],
+
+  "nodes": [
+    {
+      "id": "city_loop",
+      "type": "loop",
+      "name": "Loop Over All Cities",
+      "depends_on": [],
+      "loop": {
+        "mode": "for_each",
+        "collection": "${cities}",
+        "item_variable": "current_city",
+        "index_variable": "city_index",
+        "concurrency": 2,
+        "body_nodes": [
+          "fetch_current_weather",
+          "fetch_forecast",
+          "check_severe_weather",
+          "severe_weather_gate",
+          "send_severe_alert",
+          "ai_generate_briefing",
+          "send_weather_email"
+        ]
+      }
+    },
+
+    {
+      "id": "fetch_current_weather",
+      "type": "webhook",
+      "name": "Fetch Current Weather",
+      "depends_on": ["city_loop"],
+      "webhook": {
+        "url": "https://api.openweathermap.org/data/2.5/weather",
+        "method": "GET",
+        "headers": { "Accept": "application/json" },
+        "body": {
+          "lat":   "{{current_city.lat}}",
+          "lon":   "{{current_city.lon}}",
+          "units": "metric",
+          "appid": "{{$secret.OPENWEATHER_API_KEY}}"
+        },
+        "expected_status_codes": [200],
+        "response_mapping": {
+          "weather_data": "$.body"
+        }
+      },
+      "retry": {
+        "max_attempts": 3,
+        "backoff_strategy": "exponential",
+        "initial_delay": "PT2S"
+      },
+      "timeout": { "duration": "PT15S", "on_timeout": "skip" }
+    },
+
+    {
+      "id": "fetch_forecast",
+      "type": "webhook",
+      "name": "Fetch 5-Day Forecast",
+      "depends_on": ["fetch_current_weather"],
+      "webhook": {
+        "url": "https://api.openweathermap.org/data/2.5/forecast",
+        "method": "GET",
+        "headers": { "Accept": "application/json" },
+        "body": {
+          "lat":   "{{current_city.lat}}",
+          "lon":   "{{current_city.lon}}",
+          "units": "metric",
+          "cnt":   "8",
+          "appid": "{{$secret.OPENWEATHER_API_KEY}}"
+        },
+        "expected_status_codes": [200],
+        "response_mapping": {
+          "forecast_data": "$.body"
+        }
+      },
+      "retry": { "max_attempts": 3, "initial_delay": "PT2S", "backoff_strategy": "exponential" }
+    },
+
+    {
+      "id": "check_severe_weather",
+      "type": "action",
+      "name": "Check for Severe Weather Conditions",
+      "depends_on": ["fetch_current_weather"],
+      "action": {
+        "integration": "platform.expression_eval",
+        "operation": "evaluate",
+        "params": {
+          "expression": "weather_data.main.temp > 42 || weather_data.wind.speed > 20 || weather_data.weather[0].main in ['Thunderstorm', 'Tornado', 'Hurricane']",
+          "context": {
+            "weather_data": "{{weather_data}}"
+          }
+        }
+      },
+      "outputs": {
+        "has_severe_weather": "${check_severe_weather.result.value}",
+        "alert_message":      "${weather_data.weather[0].description} — Temp: ${weather_data.main.temp}°C, Wind: ${weather_data.wind.speed} m/s"
+      }
+    },
+
+    {
+      "id": "severe_weather_gate",
+      "type": "condition",
+      "name": "Severe Weather Alert?",
+      "depends_on": ["check_severe_weather"],
+      "condition_node": {
+        "expression": "${has_severe_weather}",
+        "branches": [
+          { "case": "true",  "next": "send_severe_alert" },
+          { "case": "false", "next": "ai_generate_briefing" }
+        ]
+      }
+    },
+
+    {
+      "id": "send_severe_alert",
+      "type": "notification",
+      "name": "Send Severe Weather Alert",
+      "depends_on": ["severe_weather_gate"],
+      "notification": {
+        "targets": [
+          {
+            "channel": "email",
+            "to": "{{current_city.subscribers}}",
+            "subject": "⚠️ Severe Weather Alert — {{current_city.name}} ({{report_date}})",
+            "body": "SEVERE WEATHER WARNING for {{current_city.name}}!\n\n{{alert_message}}\n\nPlease take necessary precautions.",
+            "severity": "critical"
+          }
+        ]
+      }
+    },
+
+    {
+      "id": "ai_generate_briefing",
+      "type": "ai",
+      "name": "AI — Generate Personalized Weather Briefing",
+      "depends_on": ["severe_weather_gate", "fetch_forecast"],
+      "delay": "PT1S",
+      "ai": {
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "system_prompt": "You are a friendly weather presenter. Write warm, engaging weather briefings.",
+        "prompt": "Generate a personalized daily weather briefing email body for {{current_city.name}}.\n\nCurrent weather: {{weather_data}}\nForecast: {{forecast_data}}\nDate: {{report_date}}\nIs weekly summary: {{is_weekly_summary}}\n\nFormat: 3–5 sentences. Include:\n- Current temperature and conditions\n- What to wear/bring\n- Forecast highlight for the day\n- Motivational closing if weekly summary",
+        "temperature": 0.7,
+        "response_format": "text"
+      },
+      "timeout": { "duration": "PT30S", "on_timeout": "fallback", "fallback_node_id": "use_default_briefing" },
+      "outputs": {
+        "ai_briefing": "${ai_generate_briefing.result}"
+      }
+    },
+
+    {
+      "id": "use_default_briefing",
+      "type": "transform",
+      "name": "Default Weather Briefing (AI Unavailable)",
+      "transform": {
+        "mappings": [
+          {
+            "target": "${ai_briefing}",
+            "value": "Good morning! Today in {{current_city.name}}: {{weather_data.weather[0].description}}, {{weather_data.main.temp}}°C. Stay safe and have a great day!"
+          }
+        ]
+      }
+    },
+
+    {
+      "id": "send_weather_email",
+      "type": "notification",
+      "name": "Send Daily Weather Email",
+      "depends_on": ["ai_generate_briefing", "use_default_briefing"],
+      "notification": {
+        "targets": [
+          {
+            "channel": "email",
+            "to": "{{current_city.subscribers}}",
+            "subject": "🌤️ Weather Briefing — {{current_city.name}} | {{report_date}}",
+            "body": "Good morning!\n\n{{ai_briefing}}\n\n📊 Quick Stats:\n• Temperature: {{weather_data.main.temp}}°C (feels like {{weather_data.main.feels_like}}°C)\n• Humidity: {{weather_data.main.humidity}}%\n• Wind: {{weather_data.wind.speed}} m/s\n• Condition: {{weather_data.weather[0].description}}\n\nStay prepared! 🌈",
+            "severity": "info"
+          }
+        ]
+      }
+    }
+  ],
+
+  "on_success": [
+    {
+      "channel": "slack",
+      "to": "#daily-ops",
+      "body": "✅ Weather emails sent for {{cities | length}} cities on {{report_date}}",
+      "severity": "info"
+    }
+  ],
+
+  "on_failure": [
+    {
+      "channel": "email",
+      "to": "admin@myorg.com",
+      "subject": "Weather workflow failed",
+      "body": "Workflow `weather_to_email` failed on {{report_date}}: {{$error.message}}",
+      "severity": "error"
+    }
+  ]
+}

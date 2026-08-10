@@ -1,0 +1,357 @@
+{
+  "$schema": "../schema/workflow.schema.json",
+  "schema_version": "1.0",
+  "workflow_id": "github_to_slack",
+  "name": "GitHub → Slack",
+  "description": "Listens to GitHub events (push, PR, issues). Runs AI code review on changed files. Routes to appropriate Slack channels with severity-aware formatting. Supports parallel review + notification branches.",
+  "version": "2.0.0",
+
+  "changelog": [
+    {
+      "version": "2.0.0",
+      "date": "2026-08-05",
+      "author": "devops-team",
+      "summary": "Added AI code review, parallel branch notifications, PR size labeling",
+      "breaking": true
+    },
+    {
+      "version": "1.0.0",
+      "date": "2026-03-01",
+      "author": "devops-team",
+      "summary": "Initial webhook → Slack pipeline"
+    }
+  ],
+
+  "metadata": {
+    "owner": "devops@myorg.com",
+    "team": "devops",
+    "project": "platform-ci",
+    "labels": {
+      "env": "production",
+      "category": "devops"
+    },
+    "created_at": "2026-03-01T00:00:00Z",
+    "updated_at": "2026-08-05T12:00:00Z",
+    "category": "DevOps Automation"
+  },
+
+  "settings": {
+    "max_concurrent_runs": 20,
+    "concurrency_key": "{{trigger.repository}}_{{trigger.event_type}}",
+    "timeout": "PT15M",
+    "timezone": "UTC",
+    "execution_mode": "dag",
+    "logging": { "level": "info" }
+  },
+
+  "secrets": [
+    { "name": "GITHUB_WEBHOOK_SECRET", "source": "github_secrets", "key": "WEBHOOK_SECRET" },
+    { "name": "SLACK_BOT_TOKEN",       "source": "vault",          "key": "slack/bot-token" },
+    { "name": "OPENAI_API_KEY",        "source": "env",            "key": "OPENAI_API_KEY" }
+  ],
+
+  "variables": [
+    { "name": "event_type",     "type": "string",  "description": "push | pull_request | issues | release" },
+    { "name": "repository",     "type": "string" },
+    { "name": "actor",          "type": "string",  "description": "GitHub actor (username)" },
+    { "name": "branch",         "type": "string" },
+    { "name": "commit_sha",     "type": "string" },
+    { "name": "pr_number",      "type": "number" },
+    { "name": "pr_title",       "type": "string" },
+    { "name": "pr_url",         "type": "string" },
+    { "name": "changed_files",  "type": "array",   "description": "List of changed file paths" },
+    { "name": "diff_content",   "type": "string",  "description": "Unified diff of the PR" },
+    { "name": "ai_review",      "type": "object",  "description": "AI code review output" },
+    { "name": "severity",       "type": "string",  "default": "info" },
+    { "name": "slack_channel",  "type": "string",  "default": "#general" },
+    { "name": "pr_size",        "type": "string",  "description": "XS|S|M|L|XL" },
+    { "name": "issue_title",    "type": "string" },
+    { "name": "issue_url",      "type": "string" },
+    { "name": "release_tag",    "type": "string" }
+  ],
+
+  "triggers": [
+    {
+      "id": "github_webhook",
+      "type": "webhook",
+      "name": "GitHub Webhook Events",
+      "enabled": true,
+      "config": {
+        "path": "/webhooks/github",
+        "secret_ref": "GITHUB_WEBHOOK_SECRET",
+        "signature_header": "X-Hub-Signature-256",
+        "accepted_events": ["push", "pull_request", "issues", "release"]
+      },
+      "input_mapping": {
+        "event_type":    "$.headers.X-GitHub-Event",
+        "repository":    "$.body.repository.full_name",
+        "actor":         "$.body.sender.login",
+        "branch":        "$.body.ref",
+        "commit_sha":    "$.body.after",
+        "pr_number":     "$.body.pull_request.number",
+        "pr_title":      "$.body.pull_request.title",
+        "pr_url":        "$.body.pull_request.html_url",
+        "changed_files": "$.body.pull_request.changed_files",
+        "issue_title":   "$.body.issue.title",
+        "issue_url":     "$.body.issue.html_url",
+        "release_tag":   "$.body.release.tag_name"
+      }
+    }
+  ],
+
+  "nodes": [
+    {
+      "id": "route_event",
+      "type": "condition",
+      "name": "Route by Event Type",
+      "depends_on": [],
+      "condition_node": {
+        "expression": "${event_type}",
+        "branches": [
+          { "case": "push",         "next": "process_push" },
+          { "case": "pull_request", "next": "fetch_pr_diff" },
+          { "case": "issues",       "next": "process_issue" },
+          { "case": "release",      "next": "process_release" }
+        ]
+      }
+    },
+
+    {
+      "id": "process_push",
+      "type": "transform",
+      "name": "Build Push Notification Data",
+      "depends_on": ["route_event"],
+      "transform": {
+        "mappings": [
+          { "target": "${slack_channel}", "value": "#code-commits" },
+          { "target": "${severity}",      "value": "info" }
+        ]
+      }
+    },
+
+    {
+      "id": "fetch_pr_diff",
+      "type": "webhook",
+      "name": "Fetch PR Diff from GitHub API",
+      "depends_on": ["route_event"],
+      "webhook": {
+        "url": "https://api.github.com/repos/{{repository}}/pulls/{{pr_number}}/files",
+        "method": "GET",
+        "headers": {
+          "Accept": "application/vnd.github.v3+json",
+          "Authorization": "Bearer {{$secret.GITHUB_WEBHOOK_SECRET}}"
+        },
+        "expected_status_codes": [200],
+        "response_mapping": {
+          "changed_files": "$.body[*].filename",
+          "diff_content":  "$.body[0].patch"
+        }
+      },
+      "retry": {
+        "max_attempts": 3,
+        "backoff_strategy": "exponential",
+        "initial_delay": "PT2S"
+      }
+    },
+
+    {
+      "id": "classify_pr_size",
+      "type": "condition",
+      "name": "Classify PR Size",
+      "depends_on": ["fetch_pr_diff"],
+      "condition_node": {
+        "expression": "${pr_number}",
+        "branches": [
+          { "case": "true", "next": "parallel_pr_processing" }
+        ]
+      }
+    },
+
+    {
+      "id": "parallel_pr_processing",
+      "type": "parallel",
+      "name": "Parallel: AI Review + Size Label",
+      "depends_on": ["fetch_pr_diff"],
+      "parallel": {
+        "branches": [
+          {
+            "id": "ai_review_branch",
+            "name": "AI Code Review",
+            "node_ids": ["ai_code_review"]
+          },
+          {
+            "id": "label_branch",
+            "name": "Label PR Size",
+            "node_ids": ["label_pr_size"]
+          }
+        ],
+        "join_mode": "all"
+      }
+    },
+
+    {
+      "id": "ai_code_review",
+      "type": "ai",
+      "name": "AI — Code Review",
+      "depends_on": ["parallel_pr_processing"],
+      "ai": {
+        "provider": "openai",
+        "model": "gpt-4o",
+        "system_prompt": "You are a senior software engineer doing code review. Be concise, constructive, and specific.",
+        "prompt": "Review this pull request diff for the repository {{repository}}:\n\nPR Title: {{pr_title}}\nChanged Files: {{changed_files}}\n\nDiff:\n{{diff_content}}\n\nProvide review as JSON with keys:\n- summary: short summary of changes\n- issues: array of {file, line, severity (error|warning|info), message}\n- score: 0-100 (code quality)\n- approved: true|false",
+        "temperature": 0.1,
+        "response_format": "json",
+        "response_schema": {
+          "type": "object",
+          "required": ["summary", "issues", "score", "approved"],
+          "properties": {
+            "summary":  { "type": "string" },
+            "issues":   { "type": "array" },
+            "score":    { "type": "number" },
+            "approved": { "type": "boolean" }
+          }
+        }
+      },
+      "timeout": { "duration": "PT2M", "on_timeout": "skip" },
+      "outputs": {
+        "ai_review": "${ai_code_review.result}"
+      }
+    },
+
+    {
+      "id": "label_pr_size",
+      "type": "webhook",
+      "name": "Label PR on GitHub",
+      "depends_on": ["parallel_pr_processing"],
+      "webhook": {
+        "url": "https://api.github.com/repos/{{repository}}/issues/{{pr_number}}/labels",
+        "method": "POST",
+        "headers": {
+          "Authorization": "Bearer {{$secret.GITHUB_WEBHOOK_SECRET}}",
+          "Accept": "application/vnd.github.v3+json"
+        },
+        "body": {
+          "labels": ["{{pr_size}}"]
+        },
+        "expected_status_codes": [200, 201]
+      }
+    },
+
+    {
+      "id": "review_comment_gate",
+      "type": "condition",
+      "name": "Post Review Comment?",
+      "depends_on": ["ai_code_review", "label_pr_size"],
+      "condition_node": {
+        "expression": "${ai_review.score} < 60",
+        "branches": [
+          { "case": "true",  "next": "post_review_comment" },
+          { "case": "false", "next": "notify_slack_pr" }
+        ]
+      }
+    },
+
+    {
+      "id": "post_review_comment",
+      "type": "webhook",
+      "name": "Post Review Comment on PR",
+      "depends_on": ["review_comment_gate"],
+      "webhook": {
+        "url": "https://api.github.com/repos/{{repository}}/pulls/{{pr_number}}/reviews",
+        "method": "POST",
+        "headers": {
+          "Authorization": "Bearer {{$secret.GITHUB_WEBHOOK_SECRET}}",
+          "Accept": "application/vnd.github.v3+json"
+        },
+        "body": {
+          "body": "🤖 **AI Code Review** (Score: {{ai_review.score}}/100)\n\n{{ai_review.summary}}\n\n**Issues Found:**\n{{ai_review.issues}}",
+          "event": "REQUEST_CHANGES"
+        },
+        "expected_status_codes": [200, 201]
+      }
+    },
+
+    {
+      "id": "notify_slack_pr",
+      "type": "notification",
+      "name": "Notify Slack — PR Update",
+      "depends_on": ["post_review_comment", "review_comment_gate"],
+      "notification": {
+        "targets": [
+          {
+            "channel": "slack",
+            "to": "#pull-requests",
+            "body": "📬 *New PR by @{{actor}}* in `{{repository}}`\n*{{pr_title}}* — {{pr_url}}\nAI Score: {{ai_review.score}}/100 | {{ai_review.summary}}",
+            "severity": "info"
+          }
+        ]
+      }
+    },
+
+    {
+      "id": "process_issue",
+      "type": "notification",
+      "name": "Notify Slack — New Issue",
+      "depends_on": ["route_event"],
+      "notification": {
+        "targets": [
+          {
+            "channel": "slack",
+            "to": "#issues",
+            "body": "🐛 *New Issue by @{{actor}}* in `{{repository}}`\n*{{issue_title}}* — {{issue_url}}",
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+
+    {
+      "id": "process_release",
+      "type": "notification",
+      "name": "Notify Slack — Release Published",
+      "depends_on": ["route_event"],
+      "notification": {
+        "targets": [
+          {
+            "channel": "slack",
+            "to": "#releases",
+            "body": "🚀 *New Release `{{release_tag}}`* published in `{{repository}}` by @{{actor}}!",
+            "severity": "info"
+          },
+          {
+            "channel": "slack",
+            "to": "#general",
+            "body": "🎉 We just shipped `{{release_tag}}`! Check out the release notes.",
+            "severity": "info"
+          }
+        ]
+      }
+    },
+
+    {
+      "id": "notify_slack_push",
+      "type": "notification",
+      "name": "Notify Slack — Push",
+      "depends_on": ["process_push"],
+      "notification": {
+        "targets": [
+          {
+            "channel": "slack",
+            "to": "#code-commits",
+            "body": "⬆️ *Push by @{{actor}}* to `{{repository}}` on `{{branch}}`\nCommit: `{{commit_sha}}`",
+            "severity": "info"
+          }
+        ]
+      }
+    }
+  ],
+
+  "on_failure": [
+    {
+      "channel": "slack",
+      "to": "#platform-alerts",
+      "body": "❌ Workflow `github_to_slack` failed for event `{{event_type}}` in `{{repository}}`: {{$error.message}}",
+      "severity": "error"
+    }
+  ]
+}

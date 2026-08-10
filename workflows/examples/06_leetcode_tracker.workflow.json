@@ -1,0 +1,564 @@
+{
+  "$schema": "../schema/workflow.schema.json",
+  "schema_version": "1.0",
+  "workflow_id": "leetcode_tracker",
+  "name": "LeetCode Progress Tracker",
+  "description": "Automated LeetCode progress tracking and study accountability system. Polls LeetCode API for new solved problems, logs them to a database and Google Sheets, uses AI to generate personalized study recommendations, sends daily/weekly progress reports, and provides motivation nudges for inactivity.",
+  "version": "2.1.0",
+
+  "changelog": [
+    {
+      "version": "2.1.0",
+      "date": "2026-08-05",
+      "author": "platform-team",
+      "summary": "Added AI study coach, streak tracking, peer comparison, weekly leaderboard"
+    },
+    {
+      "version": "2.0.0",
+      "date": "2026-05-01",
+      "author": "platform-team",
+      "summary": "Added per-student loops and parallel polling"
+    },
+    {
+      "version": "1.0.0",
+      "date": "2026-01-01",
+      "author": "platform-team",
+      "summary": "Initial progress tracker"
+    }
+  ],
+
+  "metadata": {
+    "owner": "platform-team@myorg.com",
+    "team": "education",
+    "project": "student-assignment-evaluation",
+    "labels": {
+      "env": "production",
+      "category": "education-automation"
+    },
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-08-05T12:00:00Z",
+    "category": "Education / Gamification"
+  },
+
+  "settings": {
+    "max_concurrent_runs": 1,
+    "timeout": "PT1H",
+    "timezone": "Asia/Kolkata",
+    "execution_mode": "dag",
+    "logging": {
+      "level": "info",
+      "sensitive_fields": ["email"]
+    }
+  },
+
+  "secrets": [
+    { "name": "LEETCODE_SESSION",    "source": "env",   "key": "LEETCODE_SESSION" },
+    { "name": "OPENAI_API_KEY",      "source": "env",   "key": "OPENAI_API_KEY" },
+    { "name": "GOOGLE_SHEETS_KEY",   "source": "vault", "key": "google/service-account" },
+    { "name": "SMTP_PASSWORD",       "source": "vault", "key": "smtp/password" }
+  ],
+
+  "variables": [
+    {
+      "name": "students",
+      "type": "array",
+      "default": [
+        {
+          "name": "Alice",
+          "email": "alice@college.edu",
+          "leetcode_username": "alice_coder",
+          "github_username": "alice-dev",
+          "target_problems_per_week": 10,
+          "focus_topics": ["dynamic-programming", "trees", "graphs"]
+        },
+        {
+          "name": "Bob",
+          "email": "bob@college.edu",
+          "leetcode_username": "bob_codes",
+          "github_username": "bob-dev",
+          "target_problems_per_week": 7,
+          "focus_topics": ["arrays", "strings", "hash-maps"]
+        },
+        {
+          "name": "Carol",
+          "email": "carol@college.edu",
+          "leetcode_username": "carol_algo",
+          "github_username": "carol-dev",
+          "target_problems_per_week": 15,
+          "focus_topics": ["system-design", "greedy", "binary-search"]
+        }
+      ]
+    },
+    { "name": "current_student",         "type": "object" },
+    { "name": "solved_problems",         "type": "array" },
+    { "name": "new_solutions",           "type": "array" },
+    { "name": "current_streak",          "type": "number", "default": 0 },
+    { "name": "weekly_count",            "type": "number", "default": 0 },
+    { "name": "total_solved",            "type": "number", "default": 0 },
+    { "name": "difficulty_breakdown",    "type": "object" },
+    { "name": "ai_recommendations",      "type": "string" },
+    { "name": "ai_motivational_message", "type": "string" },
+    { "name": "streak_broken",           "type": "boolean", "default": false },
+    { "name": "leaderboard",             "type": "array" },
+    { "name": "report_date",             "type": "string" },
+    { "name": "is_weekly_report",        "type": "boolean", "default": false },
+    { "name": "all_student_stats",       "type": "array" },
+    { "name": "badges_earned",           "type": "array" }
+  ],
+
+  "triggers": [
+    {
+      "id": "daily_sync_cron",
+      "type": "cron",
+      "name": "Daily Progress Sync (Evening)",
+      "enabled": true,
+      "config": {
+        "expression": "0 20 * * *",
+        "description": "Every day at 8:00 PM IST"
+      },
+      "input_mapping": {
+        "is_weekly_report": "false",
+        "report_date": "{{$now | date: '%Y-%m-%d'}}"
+      }
+    },
+    {
+      "id": "weekly_report_cron",
+      "type": "cron",
+      "name": "Weekly Report (Sunday)",
+      "enabled": true,
+      "config": {
+        "expression": "0 18 * * 0",
+        "description": "Every Sunday at 6:00 PM IST"
+      },
+      "input_mapping": {
+        "is_weekly_report": "true",
+        "report_date": "{{$now | date: '%Y-%m-%d'}}"
+      }
+    },
+    {
+      "id": "manual_trigger",
+      "type": "manual",
+      "name": "Manual Sync",
+      "enabled": true,
+      "config": {
+        "allowed_roles": ["instructor", "admin"]
+      }
+    }
+  ],
+
+  "nodes": [
+    {
+      "id": "student_loop",
+      "type": "loop",
+      "name": "Loop: Process Each Student",
+      "depends_on": [],
+      "loop": {
+        "mode": "for_each",
+        "collection": "${students}",
+        "item_variable": "current_student",
+        "index_variable": "student_index",
+        "concurrency": 2,
+        "max_iterations": 500,
+        "body_nodes": [
+          "fetch_leetcode_stats",
+          "fetch_recent_submissions",
+          "check_new_solutions",
+          "new_solutions_gate",
+          "log_new_solutions",
+          "update_sheets",
+          "check_streak",
+          "compute_badges",
+          "ai_study_coach",
+          "weekly_report_gate",
+          "send_weekly_report",
+          "send_daily_update",
+          "inactivity_gate",
+          "send_nudge"
+        ]
+      }
+    },
+
+    {
+      "id": "fetch_leetcode_stats",
+      "type": "webhook",
+      "name": "Fetch LeetCode Stats",
+      "depends_on": ["student_loop"],
+      "webhook": {
+        "url": "https://leetcode-stats-api.herokuapp.com/{{current_student.leetcode_username}}",
+        "method": "GET",
+        "headers": { "Accept": "application/json" },
+        "expected_status_codes": [200],
+        "response_mapping": {
+          "total_solved":       "$.body.totalSolved",
+          "difficulty_breakdown": {
+            "easy":   "$.body.easySolved",
+            "medium": "$.body.mediumSolved",
+            "hard":   "$.body.hardSolved"
+          }
+        }
+      },
+      "retry": { "max_attempts": 3, "initial_delay": "PT3S", "backoff_strategy": "exponential" },
+      "timeout": { "duration": "PT20S", "on_timeout": "skip" }
+    },
+
+    {
+      "id": "fetch_recent_submissions",
+      "type": "webhook",
+      "name": "Fetch Recent Submissions",
+      "depends_on": ["fetch_leetcode_stats"],
+      "webhook": {
+        "url": "https://leetcode.com/graphql",
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "LEETCODE_SESSION={{$secret.LEETCODE_SESSION}}"
+        },
+        "body": {
+          "query": "query recentAcSubmissions($username: String!, $limit: Int!) { recentAcSubmissionList(username: $username, limit: $limit) { id titleSlug title timestamp lang } }",
+          "variables": {
+            "username": "{{current_student.leetcode_username}}",
+            "limit": 20
+          }
+        },
+        "expected_status_codes": [200],
+        "response_mapping": {
+          "solved_problems": "$.body.data.recentAcSubmissionList"
+        }
+      },
+      "retry": { "max_attempts": 3, "initial_delay": "PT5S", "backoff_strategy": "exponential" },
+      "timeout": { "duration": "PT30S", "on_timeout": "skip" }
+    },
+
+    {
+      "id": "check_new_solutions",
+      "type": "action",
+      "name": "Check for New Solutions (vs DB)",
+      "depends_on": ["fetch_recent_submissions"],
+      "action": {
+        "integration": "platform.db",
+        "operation": "query",
+        "params": {
+          "query": "SELECT slug FROM leetcode_submissions WHERE student_email = '{{current_student.email}}' AND submitted_at > NOW() - INTERVAL '24 hours'"
+        }
+      },
+      "outputs": {
+        "new_solutions": "${check_new_solutions.result.new_items}",
+        "weekly_count":  "${check_new_solutions.result.weekly_count}",
+        "current_streak": "${check_new_solutions.result.current_streak}"
+      }
+    },
+
+    {
+      "id": "new_solutions_gate",
+      "type": "condition",
+      "name": "Any New Solutions Today?",
+      "depends_on": ["check_new_solutions"],
+      "condition_node": {
+        "expression": "${new_solutions | length} > 0",
+        "branches": [
+          { "case": "true",  "next": "log_new_solutions" },
+          { "case": "false", "next": "check_streak" }
+        ]
+      }
+    },
+
+    {
+      "id": "log_new_solutions",
+      "type": "action",
+      "name": "Log New Solutions to Database",
+      "depends_on": ["new_solutions_gate"],
+      "action": {
+        "integration": "platform.db",
+        "operation": "bulk_insert",
+        "params": {
+          "table": "leetcode_submissions",
+          "rows": "{{new_solutions}}",
+          "extra_fields": {
+            "student_email": "{{current_student.email}}",
+            "student_name":  "{{current_student.name}}"
+          }
+        }
+      },
+      "retry": { "max_attempts": 3, "initial_delay": "PT2S", "backoff_strategy": "exponential" }
+    },
+
+    {
+      "id": "update_sheets",
+      "type": "action",
+      "name": "Update Google Sheets Progress Tracker",
+      "depends_on": ["log_new_solutions"],
+      "action": {
+        "integration": "google.sheets",
+        "operation": "update_or_append_row",
+        "auth": "GOOGLE_SHEETS_KEY",
+        "params": {
+          "spreadsheet_id": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms",
+          "sheet": "LeetCode Progress",
+          "key_column": "email",
+          "key_value": "{{current_student.email}}",
+          "values": {
+            "Name":         "{{current_student.name}}",
+            "Email":        "{{current_student.email}}",
+            "Username":     "{{current_student.leetcode_username}}",
+            "Total Solved": "{{total_solved}}",
+            "Easy":         "{{difficulty_breakdown.easy}}",
+            "Medium":       "{{difficulty_breakdown.medium}}",
+            "Hard":         "{{difficulty_breakdown.hard}}",
+            "Weekly Count": "{{weekly_count}}",
+            "Streak":       "{{current_streak}}",
+            "Last Updated": "{{report_date}}"
+          }
+        }
+      },
+      "retry": { "max_attempts": 3, "initial_delay": "PT2S", "backoff_strategy": "exponential" }
+    },
+
+    {
+      "id": "check_streak",
+      "type": "action",
+      "name": "Check Streak Status",
+      "depends_on": ["new_solutions_gate", "update_sheets"],
+      "action": {
+        "integration": "platform.expression_eval",
+        "operation": "evaluate",
+        "params": {
+          "expression": "new_solutions.length == 0 && current_streak > 0",
+          "context": {
+            "new_solutions": "{{new_solutions}}",
+            "current_streak": "{{current_streak}}"
+          }
+        }
+      },
+      "outputs": {
+        "streak_broken": "${check_streak.result.value}"
+      }
+    },
+
+    {
+      "id": "compute_badges",
+      "type": "action",
+      "name": "Compute Earned Badges",
+      "depends_on": ["check_streak"],
+      "action": {
+        "integration": "platform.badge_engine",
+        "operation": "compute",
+        "params": {
+          "student_email":   "{{current_student.email}}",
+          "total_solved":    "{{total_solved}}",
+          "current_streak":  "{{current_streak}}",
+          "weekly_count":    "{{weekly_count}}",
+          "difficulty":      "{{difficulty_breakdown}}",
+          "badge_rules": [
+            { "id": "first_100",  "condition": "total_solved >= 100",  "label": "Century Club 🎯" },
+            { "id": "streak_7",   "condition": "current_streak >= 7",  "label": "Week Warrior 🔥" },
+            { "id": "streak_30",  "condition": "current_streak >= 30", "label": "Monthly Master 🏆" },
+            { "id": "hard_10",    "condition": "hard >= 10",           "label": "Hard Mode 💪" },
+            { "id": "daily_hero", "condition": "weekly_count >= target_problems_per_week", "label": "On Target ✅" }
+          ]
+        }
+      },
+      "outputs": {
+        "badges_earned": "${compute_badges.result.new_badges}"
+      }
+    },
+
+    {
+      "id": "ai_study_coach",
+      "type": "ai",
+      "name": "AI — Personalized Study Recommendations",
+      "depends_on": ["compute_badges"],
+      "ai": {
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "system_prompt": "You are an expert competitive programming coach. Give personalized, actionable study advice. Be encouraging and specific.",
+        "prompt": "Generate personalized LeetCode study recommendations for:\n\nStudent: {{current_student.name}}\nTotal Solved: {{total_solved}} (Easy: {{difficulty_breakdown.easy}}, Medium: {{difficulty_breakdown.medium}}, Hard: {{difficulty_breakdown.hard}})\nThis week: {{weekly_count}} / {{current_student.target_problems_per_week}} target\nCurrent streak: {{current_streak}} days\nFocus topics: {{current_student.focus_topics}}\nNew solutions today: {{new_solutions | map: 'title'}}\nBadges earned: {{badges_earned}}\n\nProvide:\n1. 3 specific problem recommendations (with LeetCode slugs) suited to their level and focus\n2. One key concept to study this week\n3. A motivational message (1-2 sentences)\n4. Study tip for improvement\n\nBe warm, specific, and encouraging.",
+        "temperature": 0.7,
+        "response_format": "text"
+      },
+      "timeout": { "duration": "PT45S", "on_timeout": "fallback", "fallback_node_id": "default_recommendation" },
+      "outputs": {
+        "ai_recommendations": "${ai_study_coach.result}"
+      }
+    },
+
+    {
+      "id": "default_recommendation",
+      "type": "transform",
+      "name": "Default Recommendation (AI Unavailable)",
+      "transform": {
+        "mappings": [
+          {
+            "target": "${ai_recommendations}",
+            "value": "Keep up the great work, {{current_student.name}}! Focus on your {{current_student.focus_topics[0]}} problems this week. Aim for consistency over quantity. You've got this! 💪"
+          }
+        ]
+      }
+    },
+
+    {
+      "id": "weekly_report_gate",
+      "type": "condition",
+      "name": "Is This the Weekly Report Run?",
+      "depends_on": ["ai_study_coach", "default_recommendation"],
+      "condition_node": {
+        "expression": "${is_weekly_report}",
+        "branches": [
+          { "case": "true",  "next": "send_weekly_report" },
+          { "case": "false", "next": "send_daily_update" }
+        ]
+      }
+    },
+
+    {
+      "id": "send_weekly_report",
+      "type": "notification",
+      "name": "Send Weekly Progress Report",
+      "depends_on": ["weekly_report_gate"],
+      "notification": {
+        "targets": [
+          {
+            "channel": "email",
+            "to": "{{current_student.email}}",
+            "subject": "📊 Your Weekly LeetCode Report — {{report_date}}",
+            "body": "Hi {{current_student.name}}! 👋\n\nHere's your weekly LeetCode progress report:\n\n📈 STATS THIS WEEK\n• Problems solved this week: {{weekly_count}} / {{current_student.target_problems_per_week}} (target)\n• Total problems solved: {{total_solved}}\n• Current streak: {{current_streak}} days\n• Difficulty: Easy {{difficulty_breakdown.easy}} | Medium {{difficulty_breakdown.medium}} | Hard {{difficulty_breakdown.hard}}\n\n🏅 BADGES EARNED\n{{badges_earned | join: ', '}}\n\n🤖 AI COACH RECOMMENDATIONS\n{{ai_recommendations}}\n\nKeep pushing! See you next week. 🚀",
+            "severity": "info"
+          }
+        ]
+      }
+    },
+
+    {
+      "id": "send_daily_update",
+      "type": "notification",
+      "name": "Send Daily Progress Update",
+      "depends_on": ["weekly_report_gate"],
+      "condition": { "expression": "${new_solutions | length} > 0" },
+      "notification": {
+        "targets": [
+          {
+            "channel": "email",
+            "to": "{{current_student.email}}",
+            "subject": "✅ LeetCode Update — {{new_solutions | length}} problem(s) solved today!",
+            "body": "Great job today, {{current_student.name}}! 🎉\n\nYou solved {{new_solutions | length}} problem(s) today:\n• {{new_solutions | map: 'title' | join: '\n• '}}\n\nStreak: 🔥 {{current_streak}} days\nThis week: {{weekly_count}} / {{current_student.target_problems_per_week}}\n\n{{ai_recommendations}}",
+            "severity": "info"
+          }
+        ]
+      }
+    },
+
+    {
+      "id": "inactivity_gate",
+      "type": "condition",
+      "name": "Inactive Today + Streak Broken?",
+      "depends_on": ["send_daily_update", "new_solutions_gate"],
+      "condition_node": {
+        "expression": "${new_solutions | length} == 0 && ${streak_broken}",
+        "branches": [
+          { "case": "true",  "next": "send_nudge" },
+          { "case": "false", "next": "end_student" }
+        ]
+      }
+    },
+
+    {
+      "id": "send_nudge",
+      "type": "notification",
+      "name": "Send Inactivity Nudge",
+      "depends_on": ["inactivity_gate"],
+      "notification": {
+        "targets": [
+          {
+            "channel": "email",
+            "to": "{{current_student.email}}",
+            "subject": "⏰ Don't break your streak, {{current_student.name}}!",
+            "body": "Hey {{current_student.name}},\n\nYour {{current_streak}}-day streak is at risk! You haven't solved any problems today yet.\n\nEven one easy problem counts. Your focus areas: {{current_student.focus_topics | join: ', '}}.\n\nYou've solved {{total_solved}} problems so far — don't stop now! 💪\n\nHappy coding! 🚀",
+            "severity": "warning"
+          }
+        ]
+      }
+    },
+
+    {
+      "id": "end_student",
+      "type": "transform",
+      "name": "End of Student Processing",
+      "depends_on": ["inactivity_gate", "send_nudge"],
+      "transform": {
+        "mappings": []
+      }
+    },
+
+    {
+      "id": "build_leaderboard",
+      "type": "action",
+      "name": "Build Weekly Leaderboard",
+      "depends_on": ["student_loop"],
+      "condition": { "expression": "${is_weekly_report}" },
+      "action": {
+        "integration": "platform.db",
+        "operation": "query",
+        "params": {
+          "query": "SELECT student_name, COUNT(*) as solved, MAX(streak) as best_streak FROM leetcode_submissions WHERE submitted_at > NOW() - INTERVAL '7 days' GROUP BY student_name ORDER BY solved DESC LIMIT 10"
+        }
+      },
+      "outputs": {
+        "leaderboard": "${build_leaderboard.result.rows}"
+      }
+    },
+
+    {
+      "id": "post_leaderboard",
+      "type": "notification",
+      "name": "Post Weekly Leaderboard to Slack",
+      "depends_on": ["build_leaderboard"],
+      "condition": { "expression": "${is_weekly_report}" },
+      "notification": {
+        "targets": [
+          {
+            "channel": "slack",
+            "to": "#leetcode-challenge",
+            "body": "🏆 *Weekly LeetCode Leaderboard* — Week of {{report_date}}\n\n{{leaderboard | each: '#{index+1}. *{student_name}* — {solved} solved 🔥{best_streak} streak'}}\n\nKeep grinding everyone! 💻✨",
+            "severity": "info"
+          }
+        ]
+      }
+    },
+
+    {
+      "id": "send_instructor_report",
+      "type": "notification",
+      "name": "Send Instructor Analytics Report",
+      "depends_on": ["build_leaderboard"],
+      "condition": { "expression": "${is_weekly_report}" },
+      "notification": {
+        "targets": [
+          {
+            "channel": "email",
+            "to": "instructor@college.edu",
+            "subject": "📊 Weekly LeetCode Instructor Report — {{report_date}}",
+            "body": "Instructor Report — Week of {{report_date}}\n\nLeaderboard:\n{{leaderboard}}\n\nThis report was automatically generated by the LeetCode Tracker workflow.",
+            "severity": "info"
+          }
+        ]
+      }
+    }
+  ],
+
+  "on_success": [
+    {
+      "channel": "slack",
+      "to": "#platform-ops",
+      "body": "✅ LeetCode Tracker sync completed for {{students | length}} students on {{report_date}}",
+      "severity": "info"
+    }
+  ],
+
+  "on_failure": [
+    {
+      "channel": "slack",
+      "to": "#platform-alerts",
+      "body": "❌ LeetCode Tracker failed on {{report_date}}: {{$error.message}}",
+      "severity": "error"
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "run_id": "run_468372e6203d",
+  "workflow_id": "comparison_test",
+  "workflow_name": "Comparison Test",
+  "status": "succeeded",
+  "started_at": "2026-08-10T09:10:22.570861+00:00",
+  "finished_at": "2026-08-10T09:10:22.574858+00:00",
+  "node_states": {
+    "api_call": {
+      "node_id": "api_call",
+      "status": "success",
+      "started_at": "2026-08-10T09:10:22.572859+00:00",
+      "finished_at": "2026-08-10T09:10:22.574858+00:00",
+      "attempt": 1,
+      "outputs": {
+        "result": {
+          "status": "simulated",
+          "integration": "rest_api",
+          "operation": "get"
+        }
+      },
+      "error": null
+    }
+  },
+  "logs": [
+    {
+      "ts": "2026-08-10T09:10:22.572859+00:00",
+      "level": "info",
+      "msg": "Starting workflow 'Comparison Test' run_id=run_468372e6203d"
+    },
+    {
+      "ts": "2026-08-10T09:10:22.572859+00:00",
+      "level": "info",
+      "msg": "Execution order: ['api_call']"
+    },
+    {
+      "ts": "2026-08-10T09:10:22.572859+00:00",
+      "level": "info",
+      "msg": "[RUN] api_call attempt 1/1 type=action"
+    },
+    {
+      "ts": "2026-08-10T09:10:22.574858+00:00",
+      "level": "info",
+      "msg": "[OK] api_call"
+    }
+  ],
+  "variables": {},
+  "error": null
+}

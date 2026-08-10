@@ -1,12 +1,14 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import os
 import time
 import uuid
 from pathlib import Path
 import html
-from typing import Any
+from typing import Any, Dict
 
 # Load environment variables from .env (shared config across web/worker/MCP server).
 try:  # pragma: no cover
@@ -15,6 +17,8 @@ try:  # pragma: no cover
     load_dotenv()
 except Exception:
     pass
+
+logger = logging.getLogger(__name__)
 
 from assignment_intel.db import get_evaluation, list_evaluations_for_user, list_recent_evaluations
 from assignment_intel.eval_service import enqueue_and_run
@@ -454,7 +458,29 @@ def _require_fastapi():
 
 
 FastAPI, File, Form, UploadFile, HTMLResponse, Request, RedirectResponse, JSONResponse = _require_fastapi()
-app = FastAPI(title="Assignment Intelligence Platform", version="0.1")
+
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def _lifespan(app):
+    # ── Startup ──────────────────────────────────────────────────
+    try:
+        from workflows.trigger_runtime import get_runtime
+        _rt = get_runtime()
+        _rt.start()
+        logger.info("TriggerRuntime started")
+    except Exception as _e:
+        logger.warning("TriggerRuntime start failed: %s", _e)
+    yield
+    # ── Shutdown ─────────────────────────────────────────────────
+    try:
+        from workflows.trigger_runtime import get_runtime
+        get_runtime().stop()
+    except Exception:
+        pass
+
+app = FastAPI(title="Assignment Intelligence Platform", version="0.1", lifespan=_lifespan)
+
 
 # ── CORS — allows the React frontend (Vercel) to call this API ────────────
 try:
@@ -2734,6 +2760,595 @@ async def api_health():
     return JSONResponse({"status": "ok", "service": "evaluator-engine"})
 
 
+# ── AI Natural Language Edit API ────────────────────────────────────────────
+
+@app.post("/api/workflows/{wf_id}/ai-edit")
+async def api_ai_edit_preview(wf_id: str, request: Request):
+    """
+    Preview an AI-powered NL edit without saving.
+    Returns the updated workflow + diff summary + changes list.
+    """
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    wf = _load_wf(wf_id)
+    if wf is None:
+        return JSONResponse({"error": "Not found"}, status_code=404)
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+    command = str(payload.get("command", "")).strip()
+    if not command:
+        return JSONResponse({"error": "command is required"}, status_code=422)
+
+    try:
+        from ai_builder.builder import WorkflowBuilder
+        builder = WorkflowBuilder()
+        result  = builder.edit(wf, command)
+    except Exception as e:
+        return JSONResponse({"error": f"AI builder unavailable: {e}"}, status_code=503)
+
+    if not result.success:
+        return JSONResponse({
+            "success": False,
+            "error":   result.error,
+        }, status_code=422)
+
+    return JSONResponse({
+        "success":          True,
+        "command_parsed":   result.command_parsed,
+        "changes":          result.changes,
+        "diff_summary":     result.diff_summary,
+        "updated_workflow": result.updated_workflow,
+        "original_nodes":   len(wf.get("nodes", [])),
+        "updated_nodes":    len((result.updated_workflow or {}).get("nodes", [])),
+    })
+
+
+@app.post("/api/workflows/{wf_id}/ai-edit/apply")
+async def api_ai_edit_apply(wf_id: str, request: Request):
+    """
+    Apply a previewed edit: accepts the updated_workflow JSON and saves it.
+    No second AI call — the frontend sends back what the preview returned.
+    """
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    wf = _load_wf(wf_id)
+    if wf is None:
+        return JSONResponse({"error": "Not found"}, status_code=404)
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+    updated = payload.get("updated_workflow")
+    if not updated or not isinstance(updated, dict):
+        return JSONResponse({"error": "updated_workflow is required"}, status_code=422)
+
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    # Preserve the ID and audit fields; accept node/edge changes only
+    for key in ("nodes", "edges", "variables", "triggers"):
+        if key in updated:
+            wf[key] = updated[key]
+    wf["updated_at"] = now
+    wf.setdefault("metadata", {})["updated_at"] = now
+
+    _save_wf(wf)
+    return JSONResponse({"success": True, "workflow": wf})
+
+
+# ── Workflow Execution API ──────────────────────────────────────────────────
+
+@app.post("/api/workflows/{wf_id}/run")
+async def api_workflow_run(wf_id: str, request: Request):
+    """Start a workflow execution. Returns run_id immediately."""
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    wf = _load_wf(wf_id)
+    if wf is None:
+        return JSONResponse({"error": "Not found"}, status_code=404)
+
+    try:
+        payload  = await request.json()
+    except Exception:
+        payload  = {}
+
+    dry_run = payload.get("dry_run", True)
+    inputs  = payload.get("inputs", {}) or {}
+
+    # Validate first
+    from workflows.engine import WorkflowEngine
+    engine = WorkflowEngine(dry_run=dry_run)
+    engine._workflow = wf
+    errors = engine.validate()
+    if errors:
+        return JSONResponse({"error": "Validation failed", "details": errors}, status_code=422)
+
+    from workflows.executor import start_run
+    run_id = start_run(wf, dry_run=dry_run, inputs=inputs)
+
+    return JSONResponse({"run_id": run_id, "workflow_id": wf_id, "dry_run": dry_run}, status_code=202)
+
+
+@app.get("/api/workflows/{wf_id}/runs")
+async def api_workflow_runs(wf_id: str, request: Request):
+    """List past runs for a workflow (newest first)."""
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    from workflows.executor import list_runs
+    return JSONResponse({"runs": list_runs(wf_id)})
+
+
+@app.get("/api/runs/{run_id}")
+async def api_run_status(run_id: str, request: Request):
+    """Get the current status and logs of a specific run."""
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    from workflows.executor import get_run, RUN_REGISTRY
+    rec = get_run(run_id)
+    if rec is None:
+        return JSONResponse({"error": "Run not found"}, status_code=404)
+    return JSONResponse(rec)
+
+
+@app.get("/api/runs/{run_id}/stream")
+async def api_run_stream(run_id: str, request: Request):
+    """
+    Server-Sent Events stream for real-time execution updates.
+
+    Auth (in priority order):
+      1. Authorization: Bearer <token>   (normal API calls)
+      2. Cookie: session=<token>         (Jinja2 pages)
+      3. ?token=<token>                  (EventSource fallback — validated server-side)
+    """
+    from fastapi.responses import StreamingResponse, Response
+    from workflows.executor import get_run
+
+    # ── Auth: check header / cookie / query param ──────────────
+    def _resolve_token() -> str | None:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            return auth[7:].strip()
+        cookie = request.cookies.get("session")
+        if cookie:
+            return cookie
+        return request.query_params.get("token")  # EventSource fallback
+
+    token = _resolve_token()
+    if not token:
+        return Response("Unauthorized", status_code=401)
+    try:
+        from assignment_intel.auth import decode_session_token
+        decode_session_token(token)   # raises if invalid/expired
+    except Exception:
+        return Response("Unauthorized", status_code=401)
+
+    async def event_generator():
+        terminal       = {"succeeded", "failed", "cancelled", "timed_out"}
+        last_log_count = 0
+        idle_ticks     = 0
+        max_idle       = 240   # 2-minute max with no activity (240 × 0.5s)
+
+        while True:
+            if await request.is_disconnected():
+                break
+
+            rec = get_run(run_id)
+            if rec is None:
+                yield f"data: {json.dumps({'error': 'run not found'})}\n\n"
+                break
+
+            log_count = len(rec.get("logs", []))
+            status_changed = rec.get("status") != rec.get("_last_sent_status")
+            if log_count != last_log_count or status_changed:
+                last_log_count = log_count
+                rec["_last_sent_status"] = rec.get("status")
+                yield f"data: {json.dumps(rec, default=str)}\n\n"
+                idle_ticks = 0
+            else:
+                idle_ticks += 1
+
+            if rec.get("status") in terminal:
+                yield f"data: {json.dumps(rec, default=str)}\n\n"
+                break
+
+            if idle_ticks > max_idle:
+                break
+
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control":     "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+
+# ── Workflow API ────────────────────────────────────────────────────────────
+# Stored as JSON files under ./workflows/saved/<id>.json so no extra DB is needed.
+
+_WF_DIR = Path("workflows") / "saved"
+
+
+def _wf_path(wf_id: str) -> Path:
+    _WF_DIR.mkdir(parents=True, exist_ok=True)
+    return _WF_DIR / f"{wf_id}.json"
+
+
+def _load_wf(wf_id: str) -> dict | None:
+    p = _wf_path(wf_id)
+    if not p.exists():
+        return None
+    with p.open(encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _save_wf(wf: dict) -> None:
+    _WF_DIR.mkdir(parents=True, exist_ok=True)
+    with _wf_path(wf["id"]).open("w", encoding="utf-8") as f:
+        json.dump(wf, f, indent=2)
+
+
+@app.get("/api/workflows")
+async def api_workflows_list(request: Request):
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    _WF_DIR.mkdir(parents=True, exist_ok=True)
+    workflows = []
+    for p in sorted(_WF_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
+        try:
+            with p.open(encoding="utf-8") as f:
+                wf = json.load(f)
+            workflows.append({
+                "id":          wf.get("id"),
+                "name":        wf.get("name", "Untitled"),
+                "description": wf.get("description", ""),
+                "updated_at":  wf.get("updated_at"),
+                "node_count":  len(wf.get("nodes", [])),
+            })
+        except Exception:
+            pass
+    return JSONResponse({"workflows": workflows})
+
+
+@app.get("/api/workflows/{wf_id}")
+async def api_workflow_get(wf_id: str, request: Request):
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    wf = _load_wf(wf_id)
+    if wf is None:
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    return JSONResponse(wf)
+
+
+@app.post("/api/workflows")
+async def api_workflow_create(payload: dict, request: Request):
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    wf_id = str(uuid.uuid4())
+    now   = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    wf = {
+        "id":           wf_id,
+        "schema_version": "1.0",
+        "workflow_id":  wf_id,
+        "name":         str(payload.get("name", "New Workflow"))[:100],
+        "description":  str(payload.get("description", ""))[:500],
+        "version":      "1.0.0",
+        "metadata":     {"owner": user.get("username", ""), "created_at": now, "updated_at": now},
+        "settings":     {"execution_mode": "dag", "max_concurrent_runs": 5, "timeout": "PT10M"},
+        "variables":    [],
+        "triggers":     [{"id": "manual_trigger", "type": "manual"}],
+        "nodes":        payload.get("nodes", []),
+        "edges":        payload.get("edges", []),
+        "created_at":   now,
+        "updated_at":   now,
+    }
+    _save_wf(wf)
+    return JSONResponse(wf, status_code=201)
+
+
+@app.put("/api/workflows/{wf_id}")
+async def api_workflow_update(wf_id: str, payload: dict, request: Request):
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    wf = _load_wf(wf_id)
+    if wf is None:
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    # Only allow patching safe fields
+    for key in ("name", "description", "nodes", "edges", "variables", "triggers", "settings"):
+        if key in payload:
+            wf[key] = payload[key]
+    wf["updated_at"] = now
+    wf.setdefault("metadata", {})["updated_at"] = now
+    _save_wf(wf)
+    # ── Persist a version snapshot ────────────────────────────────
+    _save_wf_version(wf_id, wf)
+    # ── Reload trigger runtime so new cron/webhook triggers register
+    try:
+        from workflows.trigger_runtime import get_runtime
+        get_runtime().reload()
+    except Exception:
+        pass
+    return JSONResponse(wf)
+
+
+@app.delete("/api/workflows/{wf_id}")
+async def api_workflow_delete(wf_id: str, request: Request):
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    p = _wf_path(wf_id)
+    if not p.exists():
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    p.unlink()
+    try:
+        from workflows.trigger_runtime import get_runtime
+        get_runtime().reload()
+    except Exception:
+        pass
+    return JSONResponse({"ok": True})
+
+
+# ── Webhook trigger ingress ─────────────────────────────────────────────────
+
+@app.post("/api/webhooks/{path:path}")
+async def api_webhook_trigger(path: str, request: Request):
+    """
+    Receive an inbound webhook and fire the matching workflow.
+    URL pattern: /api/webhooks/<whatever-path-is-in-trigger.webhook_path>
+    """
+    canonical = f"/webhooks/{path}"
+    try:
+        from workflows.trigger_runtime import get_runtime
+        match = get_runtime().get_webhook_workflow(canonical)
+    except Exception:
+        match = None
+
+    if not match:
+        return JSONResponse({"error": "No workflow registered for this webhook"}, status_code=404)
+
+    wf_id, trigger_id = match
+    wf = _load_wf(wf_id)
+    if not wf:
+        return JSONResponse({"error": "Workflow not found"}, status_code=404)
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    from workflows.executor import start_run
+    run_id = start_run(wf, dry_run=False, inputs={"_trigger": "webhook",
+                                                   "_trigger_id": trigger_id,
+                                                   "payload": body})
+    return JSONResponse({"run_id": run_id, "workflow_id": wf_id}, status_code=202)
+
+
+# ── Workflow Versioning ─────────────────────────────────────────────────────
+
+_VER_DIR = Path("workflows") / "versions"
+
+
+def _ver_dir(wf_id: str) -> Path:
+    d = _VER_DIR / wf_id
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _save_wf_version(wf_id: str, wf: Dict) -> None:
+    """Save a snapshot of the workflow as a new version."""
+    d   = _ver_dir(wf_id)
+    ver = int(time.time())
+    p   = d / f"{ver}.json"
+    try:
+        with p.open("w", encoding="utf-8") as f:
+            json.dump(wf, f, indent=2)
+        # Keep only last 20 versions
+        versions = sorted(d.glob("*.json"), key=lambda x: x.stat().st_mtime)
+        for old in versions[:-20]:
+            old.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+@app.get("/api/workflows/{wf_id}/versions")
+async def api_workflow_versions(wf_id: str, request: Request):
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    d = _ver_dir(wf_id)
+    versions = []
+    for p in sorted(d.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True)[:20]:
+        try:
+            with p.open(encoding="utf-8") as f:
+                wf = json.load(f)
+            versions.append({
+                "version_ts":  p.stem,
+                "saved_at":    wf.get("updated_at"),
+                "node_count":  len(wf.get("nodes", [])),
+                "name":        wf.get("name", "Untitled"),
+            })
+        except Exception:
+            pass
+    return JSONResponse({"versions": versions})
+
+
+@app.post("/api/workflows/{wf_id}/versions/{version_ts}/restore")
+async def api_workflow_restore(wf_id: str, version_ts: str, request: Request):
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    p = _ver_dir(wf_id) / f"{version_ts}.json"
+    if not p.exists():
+        return JSONResponse({"error": "Version not found"}, status_code=404)
+    with p.open(encoding="utf-8") as f:
+        wf = json.load(f)
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    wf["updated_at"] = now
+    _save_wf(wf)
+    return JSONResponse({"success": True, "workflow": wf})
+
+
+# ── Human Approval ──────────────────────────────────────────────────────────
+
+_APPROVAL_SIGNALS: Dict[str, asyncio.Event] = {}  # run_id → Event
+_APPROVAL_DECISIONS: Dict[str, Dict] = {}          # run_id → {approved, approver, comment}
+
+
+@app.post("/api/runs/{run_id}/approve")
+async def api_run_approve(run_id: str, request: Request):
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    _APPROVAL_DECISIONS[run_id] = {
+        "approved": True,
+        "approver": user.get("username", "unknown"),
+        "comment":  body.get("comment", ""),
+    }
+    if run_id in _APPROVAL_SIGNALS:
+        _APPROVAL_SIGNALS[run_id].set()
+    return JSONResponse({"ok": True, "run_id": run_id})
+
+
+@app.post("/api/runs/{run_id}/reject")
+async def api_run_reject(run_id: str, request: Request):
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    _APPROVAL_DECISIONS[run_id] = {
+        "approved": False,
+        "approver": user.get("username", "unknown"),
+        "comment":  body.get("comment", "Rejected"),
+    }
+    if run_id in _APPROVAL_SIGNALS:
+        _APPROVAL_SIGNALS[run_id].set()
+    return JSONResponse({"ok": True, "run_id": run_id})
+
+
+# ── Plugin Configuration ────────────────────────────────────────────────────
+
+@app.get("/api/plugin-configs")
+async def api_plugin_configs_get(request: Request):
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    from workflows.executor import _load_plugin_configs
+    configs = _load_plugin_configs()
+    # Strip secrets before sending to frontend
+    safe = {}
+    for pid, cfg in configs.items():
+        safe[pid] = {"config": cfg.get("config", {}), "has_secrets": bool(cfg.get("secrets"))}
+    return JSONResponse({"configs": safe})
+
+
+@app.post("/api/plugin-configs")
+async def api_plugin_configs_save(request: Request):
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    # Merge with existing (never overwrite secrets with empty values)
+    from workflows.executor import _load_plugin_configs, save_plugin_configs
+    existing = _load_plugin_configs()
+    for plugin_id, cfg in body.items():
+        entry = existing.setdefault(plugin_id, {"config": {}, "secrets": {}})
+        entry["config"].update(cfg.get("config", {}))
+        for k, v in cfg.get("secrets", {}).items():
+            if v:  # only overwrite if non-empty
+                entry["secrets"][k] = v
+    save_plugin_configs(existing)
+    return JSONResponse({"ok": True})
+
+
+# ── Example Workflow Catalogue ──────────────────────────────────────────────
+
+@app.get("/api/workflow-examples")
+async def api_workflow_examples(request: Request):
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    examples_dir = Path("workflows") / "examples"
+    examples = []
+    if examples_dir.exists():
+        for p in sorted(examples_dir.glob("*.json")):
+            try:
+                with p.open(encoding="utf-8") as f:
+                    wf = json.load(f)
+                examples.append({
+                    "file":        p.name,
+                    "name":        wf.get("name", p.stem),
+                    "description": wf.get("description", ""),
+                    "node_count":  len(wf.get("nodes", [])),
+                    "workflow":    wf,
+                })
+            except Exception:
+                pass
+    return JSONResponse({"examples": examples})
+
+
+# ── AI Workflow Generation ──────────────────────────────────────────────────
+
+@app.post("/api/ai/generate-workflow")
+async def api_ai_generate_workflow(request: Request):
+    user = _current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+    intent = str(body.get("intent", "")).strip()
+    if not intent:
+        return JSONResponse({"error": "intent is required"}, status_code=422)
+    try:
+        from ai_builder.builder import WorkflowBuilder
+        result = WorkflowBuilder().build(intent)
+    except Exception as e:
+        return JSONResponse({"error": f"AI builder unavailable: {e}"}, status_code=503)
+    if not result.success:
+        return JSONResponse({"error": result.error}, status_code=422)
+    return JSONResponse({
+        "success":       True,
+        "workflow":      result.workflow_json,
+        "explanation":   result.explanation,
+        "node_count":    len((result.workflow_json or {}).get("nodes", [])),
+    })
+
+
 def main() -> None:
     try:
         import uvicorn
@@ -2746,3 +3361,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

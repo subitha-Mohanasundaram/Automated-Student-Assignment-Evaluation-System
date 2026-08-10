@@ -1,0 +1,48 @@
+{
+  "run_id": "run_9ca3d02631e7",
+  "workflow_id": "comparison_test",
+  "workflow_name": "Comparison Test",
+  "status": "failed",
+  "started_at": "2026-08-10T09:10:22.873851+00:00",
+  "finished_at": "2026-08-10T09:10:24.016402+00:00",
+  "node_states": {
+    "api_call": {
+      "node_id": "api_call",
+      "status": "failed",
+      "started_at": "2026-08-10T09:10:22.876368+00:00",
+      "finished_at": "2026-08-10T09:10:24.016402+00:00",
+      "attempt": 1,
+      "outputs": {},
+      "error": "[Errno 11001] getaddrinfo failed"
+    }
+  },
+  "logs": [
+    {
+      "ts": "2026-08-10T09:10:22.876368+00:00",
+      "level": "info",
+      "msg": "Starting workflow 'Comparison Test' run_id=run_9ca3d02631e7"
+    },
+    {
+      "ts": "2026-08-10T09:10:22.876368+00:00",
+      "level": "info",
+      "msg": "Execution order: ['api_call']"
+    },
+    {
+      "ts": "2026-08-10T09:10:22.876368+00:00",
+      "level": "info",
+      "msg": "[RUN] api_call attempt 1/1 type=action"
+    },
+    {
+      "ts": "2026-08-10T09:10:24.016402+00:00",
+      "level": "warning",
+      "msg": "[RETRY] api_call attempt 1/1: [Errno 11001] getaddrinfo failed"
+    },
+    {
+      "ts": "2026-08-10T09:10:24.016402+00:00",
+      "level": "error",
+      "msg": "[FAIL] api_call: [Errno 11001] getaddrinfo failed"
+    }
+  ],
+  "variables": {},
+  "error": null
+}

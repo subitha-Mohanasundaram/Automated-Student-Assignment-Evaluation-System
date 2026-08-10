@@ -1,0 +1,48 @@
+{
+  "run_id": "run_fbfcde371785",
+  "workflow_id": "test_comparison",
+  "workflow_name": "Test Dry-Run vs Live",
+  "status": "failed",
+  "started_at": "2026-08-10T09:07:39.040284+00:00",
+  "finished_at": "2026-08-10T09:07:40.877487+00:00",
+  "node_states": {
+    "http_call": {
+      "node_id": "http_call",
+      "status": "failed",
+      "started_at": "2026-08-10T09:07:39.046813+00:00",
+      "finished_at": "2026-08-10T09:07:40.877487+00:00",
+      "attempt": 1,
+      "outputs": {},
+      "error": "[Errno 11001] getaddrinfo failed"
+    }
+  },
+  "logs": [
+    {
+      "ts": "2026-08-10T09:07:39.046813+00:00",
+      "level": "info",
+      "msg": "Starting workflow 'Test Dry-Run vs Live' run_id=run_fbfcde371785"
+    },
+    {
+      "ts": "2026-08-10T09:07:39.046813+00:00",
+      "level": "info",
+      "msg": "Execution order: ['http_call']"
+    },
+    {
+      "ts": "2026-08-10T09:07:39.046813+00:00",
+      "level": "info",
+      "msg": "[RUN] http_call attempt 1/1 type=action"
+    },
+    {
+      "ts": "2026-08-10T09:07:40.877487+00:00",
+      "level": "warning",
+      "msg": "[RETRY] http_call attempt 1/1: [Errno 11001] getaddrinfo failed"
+    },
+    {
+      "ts": "2026-08-10T09:07:40.877487+00:00",
+      "level": "error",
+      "msg": "[FAIL] http_call: [Errno 11001] getaddrinfo failed"
+    }
+  ],
+  "variables": {},
+  "error": null
+}

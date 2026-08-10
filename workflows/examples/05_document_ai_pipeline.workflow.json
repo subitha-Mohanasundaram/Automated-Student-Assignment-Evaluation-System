@@ -1,0 +1,419 @@
+{
+  "$schema": "../schema/workflow.schema.json",
+  "schema_version": "1.0",
+  "workflow_id": "document_ai_pipeline",
+  "name": "Document AI Pipeline",
+  "description": "Automated document intelligence pipeline. Accepts uploaded documents (PDF, DOCX, images), extracts text via OCR, classifies with AI, extracts structured entities, validates with a human reviewer, archives to storage, and delivers a structured report.",
+  "version": "1.3.0",
+
+  "changelog": [
+    {
+      "version": "1.3.0",
+      "date": "2026-08-05",
+      "author": "ai-team",
+      "summary": "Added RAG-based classification, entity extraction schema, and parallel OCR paths"
+    },
+    {
+      "version": "1.2.0",
+      "date": "2026-06-01",
+      "author": "ai-team",
+      "summary": "Added human validation for low-confidence extractions"
+    },
+    {
+      "version": "1.0.0",
+      "date": "2026-03-01",
+      "author": "ai-team",
+      "summary": "Initial document classification pipeline"
+    }
+  ],
+
+  "metadata": {
+    "owner": "ai-team@myorg.com",
+    "team": "ai-engineering",
+    "project": "document-intelligence",
+    "labels": {
+      "env": "production",
+      "category": "document-ai"
+    },
+    "created_at": "2026-03-01T00:00:00Z",
+    "updated_at": "2026-08-05T12:00:00Z",
+    "category": "AI / Document Processing",
+    "compliance_tags": ["GDPR", "HIPAA"]
+  },
+
+  "settings": {
+    "max_concurrent_runs": 10,
+    "timeout": "PT30M",
+    "timezone": "UTC",
+    "execution_mode": "dag",
+    "logging": {
+      "level": "info",
+      "sensitive_fields": ["ssn", "dob", "bank_account"]
+    }
+  },
+
+  "secrets": [
+    { "name": "OPENAI_API_KEY",       "source": "env",   "key": "OPENAI_API_KEY" },
+    { "name": "GOOGLE_VISION_KEY",    "source": "vault", "key": "google/vision-api-key" },
+    { "name": "S3_SECRET_KEY",        "source": "vault", "key": "aws/s3-secret" },
+    { "name": "S3_ACCESS_KEY",        "source": "vault", "key": "aws/s3-access" }
+  ],
+
+  "variables": [
+    { "name": "document_id",       "type": "string" },
+    { "name": "document_url",      "type": "string" },
+    { "name": "document_name",     "type": "string" },
+    { "name": "document_type",     "type": "string",  "description": "pdf | docx | image | txt" },
+    { "name": "raw_text",          "type": "string",  "description": "OCR/extracted text" },
+    { "name": "doc_classification","type": "object",  "description": "AI classification result" },
+    { "name": "extracted_entities","type": "object",  "description": "Structured entities" },
+    { "name": "confidence_score",  "type": "number",  "default": 0 },
+    { "name": "needs_review",      "type": "boolean", "default": false },
+    { "name": "review_approved",   "type": "boolean", "default": false },
+    { "name": "archive_url",       "type": "string" },
+    { "name": "final_report",      "type": "object" },
+    { "name": "page_count",        "type": "number" },
+    { "name": "uploader_email",    "type": "string", "sensitive": true },
+    { "name": "pages",             "type": "array",   "description": "Individual page contents for loop" }
+  ],
+
+  "triggers": [
+    {
+      "id": "document_upload_webhook",
+      "type": "webhook",
+      "name": "Document Upload Event",
+      "enabled": true,
+      "config": {
+        "path": "/webhooks/document-upload"
+      },
+      "input_mapping": {
+        "document_id":    "$.body.document_id",
+        "document_url":   "$.body.url",
+        "document_name":  "$.body.filename",
+        "document_type":  "$.body.file_type",
+        "uploader_email": "$.body.uploader_email",
+        "page_count":     "$.body.page_count"
+      }
+    },
+    {
+      "id": "s3_event_trigger",
+      "type": "event",
+      "name": "S3 Bucket Upload Event",
+      "enabled": true,
+      "config": {
+        "source": "aws.s3",
+        "event":  "ObjectCreated",
+        "bucket": "myorg-document-intake"
+      },
+      "input_mapping": {
+        "document_url":  "$.body.s3.object.key",
+        "document_name": "$.body.s3.object.key",
+        "document_type": "$.body.s3.object.content-type"
+      }
+    }
+  ],
+
+  "nodes": [
+    {
+      "id": "route_by_type",
+      "type": "condition",
+      "name": "Route by Document Type",
+      "depends_on": [],
+      "condition_node": {
+        "expression": "${document_type}",
+        "branches": [
+          { "case": "image", "next": "ocr_image" },
+          { "case": "pdf",   "next": "extract_pdf_text" },
+          { "case": "docx",  "next": "extract_docx_text" },
+          { "case": "txt",   "next": "read_text_file" }
+        ]
+      }
+    },
+
+    {
+      "id": "ocr_image",
+      "type": "action",
+      "name": "OCR: Extract Text from Image",
+      "depends_on": ["route_by_type"],
+      "action": {
+        "integration": "google.vision",
+        "operation": "text_detection",
+        "auth": "GOOGLE_VISION_KEY",
+        "params": {
+          "image_url": "{{document_url}}",
+          "language_hints": ["en", "ta", "hi"]
+        }
+      },
+      "retry": { "max_attempts": 3, "initial_delay": "PT3S", "backoff_strategy": "exponential" },
+      "timeout": { "duration": "PT1M", "on_timeout": "fail" },
+      "outputs": { "raw_text": "${ocr_image.result.text}" }
+    },
+
+    {
+      "id": "extract_pdf_text",
+      "type": "action",
+      "name": "Extract Text from PDF",
+      "depends_on": ["route_by_type"],
+      "action": {
+        "integration": "platform.document_parser",
+        "operation": "extract_pdf",
+        "params": {
+          "url":   "{{document_url}}",
+          "pages": "all",
+          "mode":  "native_with_ocr_fallback"
+        }
+      },
+      "retry": { "max_attempts": 3, "initial_delay": "PT5S", "backoff_strategy": "exponential" },
+      "outputs": {
+        "raw_text": "${extract_pdf_text.result.text}",
+        "pages":    "${extract_pdf_text.result.pages}"
+      }
+    },
+
+    {
+      "id": "extract_docx_text",
+      "type": "action",
+      "name": "Extract Text from DOCX",
+      "depends_on": ["route_by_type"],
+      "action": {
+        "integration": "platform.document_parser",
+        "operation": "extract_docx",
+        "params": { "url": "{{document_url}}" }
+      },
+      "outputs": {
+        "raw_text": "${extract_docx_text.result.text}",
+        "pages":    "${extract_docx_text.result.pages}"
+      }
+    },
+
+    {
+      "id": "read_text_file",
+      "type": "webhook",
+      "name": "Read Plain Text File",
+      "depends_on": ["route_by_type"],
+      "webhook": {
+        "url": "{{document_url}}",
+        "method": "GET",
+        "expected_status_codes": [200],
+        "response_mapping": { "raw_text": "$.body" }
+      }
+    },
+
+    {
+      "id": "parallel_ai_processing",
+      "type": "parallel",
+      "name": "Parallel: Classify + Extract Entities",
+      "depends_on": ["ocr_image", "extract_pdf_text", "extract_docx_text", "read_text_file"],
+      "parallel": {
+        "branches": [
+          {
+            "id": "classify_branch",
+            "name": "AI Document Classification",
+            "node_ids": ["ai_classify_document"]
+          },
+          {
+            "id": "entity_branch",
+            "name": "AI Entity Extraction",
+            "node_ids": ["ai_extract_entities"]
+          }
+        ],
+        "join_mode": "all",
+        "max_concurrency": 2
+      }
+    },
+
+    {
+      "id": "ai_classify_document",
+      "type": "ai",
+      "name": "AI — Classify Document",
+      "depends_on": ["parallel_ai_processing"],
+      "ai": {
+        "provider": "openai",
+        "model": "gpt-4o",
+        "system_prompt": "You are a document classification expert. Classify documents accurately.",
+        "prompt": "Classify this document:\n\nFilename: {{document_name}}\nContent (first 3000 chars):\n{{raw_text | truncate: 3000}}\n\nReturn JSON:\n- category: invoice|resume|contract|report|form|letter|certificate|other\n- subcategory: specific type within category\n- language: ISO 639-1 code\n- confidence: 0-100\n- is_sensitive: true if contains PII/financial data\n- summary: 1-2 sentence description",
+        "temperature": 0.1,
+        "response_format": "json",
+        "rag": {
+          "enabled": true,
+          "collection": "document_taxonomy",
+          "top_k": 3
+        }
+      },
+      "timeout": { "duration": "PT1M", "on_timeout": "skip" },
+      "outputs": {
+        "doc_classification": "${ai_classify_document.result}",
+        "confidence_score":   "${ai_classify_document.result.confidence}"
+      }
+    },
+
+    {
+      "id": "ai_extract_entities",
+      "type": "ai",
+      "name": "AI — Extract Structured Entities",
+      "depends_on": ["parallel_ai_processing"],
+      "ai": {
+        "provider": "openai",
+        "model": "gpt-4o",
+        "system_prompt": "You are a named entity recognition expert. Extract entities precisely.",
+        "prompt": "Extract structured entities from this document:\n\n{{raw_text | truncate: 5000}}\n\nReturn JSON with arrays for each found entity type:\n- persons: [{name, role}]\n- organizations: [{name, type}]\n- dates: [{date, context}]\n- amounts: [{value, currency, context}]\n- addresses: [{full_address, type}]\n- ids: [{value, type}] (IDs, reg numbers, etc.)\n- emails: [string]\n- phones: [string]",
+        "temperature": 0.05,
+        "response_format": "json",
+        "response_schema": {
+          "type": "object",
+          "properties": {
+            "persons":       { "type": "array" },
+            "organizations": { "type": "array" },
+            "dates":         { "type": "array" },
+            "amounts":       { "type": "array" },
+            "addresses":     { "type": "array" },
+            "ids":           { "type": "array" },
+            "emails":        { "type": "array" },
+            "phones":        { "type": "array" }
+          }
+        }
+      },
+      "timeout": { "duration": "PT90S", "on_timeout": "skip" },
+      "outputs": {
+        "extracted_entities": "${ai_extract_entities.result}"
+      }
+    },
+
+    {
+      "id": "confidence_gate",
+      "type": "condition",
+      "name": "Confidence Gate: Needs Human Review?",
+      "depends_on": ["ai_classify_document", "ai_extract_entities"],
+      "condition_node": {
+        "expression": "${confidence_score} < 70 || ${doc_classification.is_sensitive}",
+        "branches": [
+          { "case": "true",  "next": "human_review_node" },
+          { "case": "false", "next": "build_final_report" }
+        ]
+      }
+    },
+
+    {
+      "id": "human_review_node",
+      "type": "human_approval",
+      "name": "Human Validation — Low Confidence or Sensitive",
+      "depends_on": ["confidence_gate"],
+      "human_approval": {
+        "approvers": ["reviewer@myorg.com", "data-team@myorg.com"],
+        "approval_mode": "any",
+        "instructions": "AI confidence is low or document contains sensitive data. Please verify the classification and extracted entities before archiving.",
+        "data_to_review": {
+          "Document":        "{{document_name}}",
+          "Classification":  "{{doc_classification.category}} / {{doc_classification.subcategory}}",
+          "Confidence":      "{{confidence_score}}%",
+          "Summary":         "{{doc_classification.summary}}",
+          "Is Sensitive":    "{{doc_classification.is_sensitive}}",
+          "Entities Found":  "{{extracted_entities}}"
+        },
+        "expiry": "PT8H",
+        "on_expiry": "auto_approve",
+        "channels": ["email", "slack"]
+      },
+      "outputs": {
+        "review_approved": "${human_review_node.result.approved}"
+      }
+    },
+
+    {
+      "id": "build_final_report",
+      "type": "transform",
+      "name": "Build Final Report Object",
+      "depends_on": ["confidence_gate", "human_review_node"],
+      "condition": {
+        "logic": "OR",
+        "rules": [
+          { "expression": "${confidence_score} >= 70 && !${doc_classification.is_sensitive}" },
+          { "expression": "${review_approved} == true" }
+        ]
+      },
+      "transform": {
+        "mappings": [
+          {
+            "target": "${final_report}",
+            "value": {
+              "document_id":    "{{document_id}}",
+              "document_name":  "{{document_name}}",
+              "processed_at":   "{{$now}}",
+              "classification": "{{doc_classification}}",
+              "entities":       "{{extracted_entities}}",
+              "page_count":     "{{page_count}}",
+              "raw_text_chars": "{{raw_text | size}}"
+            }
+          }
+        ]
+      }
+    },
+
+    {
+      "id": "archive_to_s3",
+      "type": "action",
+      "name": "Archive Processed Document to S3",
+      "depends_on": ["build_final_report"],
+      "action": {
+        "integration": "aws.s3",
+        "operation": "put_object",
+        "auth": "S3_ACCESS_KEY",
+        "params": {
+          "bucket": "myorg-document-archive",
+          "key":    "processed/{{doc_classification.category}}/{{document_id}}/report.json",
+          "body":   "{{final_report}}",
+          "metadata": {
+            "document_name": "{{document_name}}",
+            "category":      "{{doc_classification.category}}",
+            "confidence":    "{{confidence_score}}"
+          }
+        }
+      },
+      "retry": { "max_attempts": 3, "initial_delay": "PT3S", "backoff_strategy": "exponential" },
+      "outputs": { "archive_url": "${archive_to_s3.result.location}" }
+    },
+
+    {
+      "id": "notify_uploader",
+      "type": "notification",
+      "name": "Notify Uploader — Processing Complete",
+      "depends_on": ["archive_to_s3"],
+      "notification": {
+        "targets": [
+          {
+            "channel": "email",
+            "to": "{{uploader_email}}",
+            "subject": "✅ Document Processed: {{document_name}}",
+            "body": "Your document has been successfully processed.\n\nDocument: {{document_name}}\nCategory: {{doc_classification.category}} ({{doc_classification.subcategory}})\nConfidence: {{confidence_score}}%\nPages: {{page_count}}\n\nSummary: {{doc_classification.summary}}\n\nArchived at: {{archive_url}}\n\nThank you!",
+            "severity": "info"
+          }
+        ]
+      }
+    }
+  ],
+
+  "on_success": [
+    {
+      "channel": "slack",
+      "to": "#document-pipeline",
+      "body": "📄 Document `{{document_name}}` processed. Category: {{doc_classification.category}} | Confidence: {{confidence_score}}%",
+      "severity": "info"
+    }
+  ],
+
+  "on_failure": [
+    {
+      "channel": "email",
+      "to": "{{uploader_email}}",
+      "subject": "❌ Document Processing Failed: {{document_name}}",
+      "body": "We were unable to process your document `{{document_name}}`. Error: {{$error.message}}\n\nPlease re-upload or contact support.",
+      "severity": "error"
+    },
+    {
+      "channel": "slack",
+      "to": "#platform-alerts",
+      "body": "❌ Document AI pipeline failed for `{{document_name}}`: {{$error.message}}",
+      "severity": "error"
+    }
+  ]
+}

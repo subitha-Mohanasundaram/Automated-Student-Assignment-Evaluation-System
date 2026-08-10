@@ -1,0 +1,49 @@
+{
+  "run_id": "run_330c7aa6ac05",
+  "workflow_id": "test_vars",
+  "workflow_name": "Var test",
+  "status": "succeeded",
+  "started_at": "2026-08-07T13:32:35.382055+00:00",
+  "finished_at": "2026-08-07T13:32:35.388028+00:00",
+  "node_states": {
+    "n1": {
+      "node_id": "n1",
+      "status": "success",
+      "started_at": "2026-08-07T13:32:35.384493+00:00",
+      "finished_at": "2026-08-07T13:32:35.388028+00:00",
+      "attempt": 1,
+      "outputs": {
+        "result": {
+          "status": "simulated",
+          "integration": "rest_api",
+          "operation": "get"
+        }
+      },
+      "error": null
+    }
+  },
+  "logs": [
+    {
+      "ts": "2026-08-07T13:32:35.384493+00:00",
+      "level": "info",
+      "msg": "Starting workflow 'Var test' run_id=run_330c7aa6ac05"
+    },
+    {
+      "ts": "2026-08-07T13:32:35.384493+00:00",
+      "level": "info",
+      "msg": "Execution order: ['n1']"
+    },
+    {
+      "ts": "2026-08-07T13:32:35.384493+00:00",
+      "level": "info",
+      "msg": "[RUN] n1 attempt 1/1 type=action"
+    },
+    {
+      "ts": "2026-08-07T13:32:35.388028+00:00",
+      "level": "info",
+      "msg": "[OK] n1"
+    }
+  ],
+  "variables": {},
+  "error": null
+}

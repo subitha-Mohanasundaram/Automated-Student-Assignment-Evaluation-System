@@ -1,0 +1,830 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://automation.platform/schemas/workflow/v1",
+  "title": "Universal Workflow Definition",
+  "description": "Future-proof universal workflow format supporting triggers, actions, conditions, loops, parallel execution, variables, retry, timeout, delay, AI nodes, webhooks, cron, human approval, notifications, error handling, versioning, metadata, and execution state.",
+  "type": "object",
+  "required": ["schema_version", "workflow_id", "name", "version", "metadata", "triggers", "nodes"],
+  "additionalProperties": false,
+
+  "definitions": {
+
+    "semver": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version string (MAJOR.MINOR.PATCH)"
+    },
+
+    "iso_duration": {
+      "type": "string",
+      "pattern": "^P(?:\\d+Y)?(?:\\d+M)?(?:\\d+W)?(?:\\d+D)?(?:T(?:\\d+H)?(?:\\d+M)?(?:\\d+(?:\\.\\d+)?S)?)?$",
+      "description": "ISO 8601 duration string (e.g. PT30S, PT5M, P1D)"
+    },
+
+    "cron_expression": {
+      "type": "string",
+      "description": "Standard 5-field cron expression (minute hour dom month dow)"
+    },
+
+    "expression": {
+      "type": "string",
+      "description": "Template expression using {{variable}} syntax or JSONPath ($.) or CEL expressions"
+    },
+
+    "variable_ref": {
+      "type": "string",
+      "pattern": "^\\$\\{[a-zA-Z0-9_.\\[\\]]+\\}$|^\\{\\{[^}]+\\}\\}$",
+      "description": "Variable reference: ${var.path} or {{var.path}}"
+    },
+
+    "retry_policy": {
+      "type": "object",
+      "description": "Retry strategy for a node or action",
+      "required": ["max_attempts"],
+      "additionalProperties": false,
+      "properties": {
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Maximum number of total attempts (including first try)"
+        },
+        "initial_delay": { "$ref": "#/definitions/iso_duration" },
+        "backoff_strategy": {
+          "type": "string",
+          "enum": ["fixed", "linear", "exponential", "jitter"],
+          "default": "exponential"
+        },
+        "backoff_multiplier": {
+          "type": "number",
+          "minimum": 1,
+          "default": 2
+        },
+        "max_delay": { "$ref": "#/definitions/iso_duration" },
+        "retry_on": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Error codes or class names that trigger a retry. Empty = retry on any error."
+        },
+        "abort_on": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Error codes that immediately abort without retrying"
+        }
+      }
+    },
+
+    "timeout_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "duration": { "$ref": "#/definitions/iso_duration" },
+        "on_timeout": {
+          "type": "string",
+          "enum": ["fail", "skip", "fallback", "escalate"],
+          "default": "fail"
+        },
+        "fallback_node_id": {
+          "type": "string",
+          "description": "Node to jump to on timeout when on_timeout=fallback"
+        }
+      }
+    },
+
+    "error_handler": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["on_error"],
+      "properties": {
+        "on_error": {
+          "type": "string",
+          "enum": ["fail", "ignore", "retry", "fallback", "escalate", "compensate"],
+          "description": "Behaviour when this node errors"
+        },
+        "fallback_node_id": { "type": "string" },
+        "compensation_node_id": {
+          "type": "string",
+          "description": "Saga-style compensating transaction node"
+        },
+        "capture_error_to": {
+          "type": "string",
+          "description": "Variable name to write error details into"
+        },
+        "notify": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/notification_target" }
+        }
+      }
+    },
+
+    "notification_target": {
+      "type": "object",
+      "required": ["channel", "to"],
+      "additionalProperties": false,
+      "properties": {
+        "channel": {
+          "type": "string",
+          "enum": ["email", "slack", "teams", "sms", "webhook", "pagerduty", "opsgenie", "discord", "telegram"]
+        },
+        "to": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" } }
+          ],
+          "description": "Recipient address, channel name, webhook URL, or phone number"
+        },
+        "subject": { "type": "string" },
+        "body": {
+          "type": "string",
+          "description": "Supports {{variable}} interpolation"
+        },
+        "template_id": {
+          "type": "string",
+          "description": "Reference to a named notification template"
+        },
+        "attachments": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "error", "critical"],
+          "default": "info"
+        }
+      }
+    },
+
+    "variable_definition": {
+      "type": "object",
+      "required": ["name", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": ["string", "number", "boolean", "object", "array", "secret", "datetime"]
+        },
+        "default": {},
+        "description": { "type": "string" },
+        "sensitive": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, value is masked in logs"
+        },
+        "schema": {
+          "type": "object",
+          "description": "JSON Schema for object/array types"
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["global", "workflow", "node", "loop"],
+          "default": "workflow"
+        }
+      }
+    },
+
+    "condition": {
+      "type": "object",
+      "oneOf": [
+        {
+          "required": ["expression"],
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "CEL or simple expression: e.g. '${score} >= 80'"
+            }
+          }
+        },
+        {
+          "required": ["logic", "rules"],
+          "properties": {
+            "logic": {
+              "type": "string",
+              "enum": ["AND", "OR", "NOT"]
+            },
+            "rules": {
+              "type": "array",
+              "items": { "$ref": "#/definitions/condition" }
+            }
+          }
+        }
+      ]
+    },
+
+    "node_base": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "description": "Unique node identifier within this workflow"
+        },
+        "type": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "depends_on": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "IDs of nodes that must complete before this one starts"
+        },
+        "condition": {
+          "$ref": "#/definitions/condition",
+          "description": "Skip this node unless condition is true"
+        },
+        "timeout": { "$ref": "#/definitions/timeout_policy" },
+        "retry": { "$ref": "#/definitions/retry_policy" },
+        "delay": {
+          "oneOf": [
+            { "$ref": "#/definitions/iso_duration" },
+            {
+              "type": "object",
+              "properties": {
+                "until": {
+                  "type": "string",
+                  "description": "Wait until this ISO8601 datetime or expression"
+                }
+              }
+            }
+          ],
+          "description": "Delay before this node executes"
+        },
+        "error_handler": { "$ref": "#/definitions/error_handler" },
+        "outputs": {
+          "type": "object",
+          "description": "Map output keys to variable names: { result: '${my_var}' }",
+          "additionalProperties": { "type": "string" }
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
+  },
+
+  "properties": {
+
+    "schema_version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "The version of this schema definition"
+    },
+
+    "workflow_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "description": "Globally unique workflow identifier"
+    },
+
+    "name": {
+      "type": "string",
+      "description": "Human-readable workflow name"
+    },
+
+    "description": { "type": "string" },
+
+    "version": {
+      "$ref": "#/definitions/semver",
+      "description": "Workflow version (bumped on structural changes)"
+    },
+
+    "changelog": {
+      "type": "array",
+      "description": "Version history",
+      "items": {
+        "type": "object",
+        "required": ["version", "date", "author", "summary"],
+        "additionalProperties": false,
+        "properties": {
+          "version": { "$ref": "#/definitions/semver" },
+          "date": { "type": "string", "format": "date" },
+          "author": { "type": "string" },
+          "summary": { "type": "string" },
+          "breaking": { "type": "boolean", "default": false }
+        }
+      }
+    },
+
+    "metadata": {
+      "type": "object",
+      "description": "Workflow-level metadata",
+      "required": ["owner", "created_at"],
+      "additionalProperties": false,
+      "properties": {
+        "owner": { "type": "string" },
+        "team": { "type": "string" },
+        "project": { "type": "string" },
+        "labels": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "deprecated": { "type": "boolean", "default": false },
+        "documentation_url": { "type": "string", "format": "uri" },
+        "icon": { "type": "string" },
+        "category": { "type": "string" },
+        "compliance_tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "e.g. ['GDPR', 'SOC2', 'HIPAA']"
+        }
+      }
+    },
+
+    "settings": {
+      "type": "object",
+      "description": "Global execution settings for this workflow",
+      "additionalProperties": false,
+      "properties": {
+        "max_concurrent_runs": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1,
+          "description": "Maximum number of concurrent workflow instances"
+        },
+        "concurrency_key": {
+          "type": "string",
+          "description": "Expression to group concurrent runs: only 1 run per key value"
+        },
+        "timeout": { "$ref": "#/definitions/iso_duration" },
+        "timezone": {
+          "type": "string",
+          "default": "UTC",
+          "description": "IANA timezone for cron scheduling"
+        },
+        "environment": {
+          "type": "string",
+          "enum": ["development", "staging", "production"],
+          "default": "production"
+        },
+        "execution_mode": {
+          "type": "string",
+          "enum": ["sequential", "dag", "event_driven"],
+          "default": "dag",
+          "description": "How nodes are scheduled: sequential chain, DAG, or event-driven"
+        },
+        "logging": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "level": {
+              "type": "string",
+              "enum": ["debug", "info", "warn", "error"],
+              "default": "info"
+            },
+            "sensitive_fields": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+
+    "variables": {
+      "type": "array",
+      "description": "Workflow-scoped variable declarations",
+      "items": { "$ref": "#/definitions/variable_definition" }
+    },
+
+    "secrets": {
+      "type": "array",
+      "description": "References to external secret store keys",
+      "items": {
+        "type": "object",
+        "required": ["name", "source"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "source": {
+            "type": "string",
+            "enum": ["env", "vault", "aws_ssm", "gcp_secret_manager", "azure_keyvault", "github_secrets"]
+          },
+          "key": { "type": "string" }
+        }
+      }
+    },
+
+    "triggers": {
+      "type": "array",
+      "description": "One or more events that can start this workflow",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "type"],
+        "properties": {
+          "id": { "type": "string" },
+          "type": {
+            "type": "string",
+            "enum": [
+              "webhook", "cron", "manual", "event", "email",
+              "file_watch", "database", "queue", "api_poll",
+              "github", "google_forms", "slack_command"
+            ]
+          },
+          "name": { "type": "string" },
+          "enabled": { "type": "boolean", "default": true },
+          "config": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Trigger-specific configuration"
+          },
+          "filters": {
+            "type": "array",
+            "items": { "$ref": "#/definitions/condition" },
+            "description": "Only fire if all filters pass"
+          },
+          "input_mapping": {
+            "type": "object",
+            "additionalProperties": { "type": "string" },
+            "description": "Map trigger payload fields to workflow variables"
+          }
+        }
+      }
+    },
+
+    "nodes": {
+      "type": "array",
+      "description": "The list of nodes (steps) in this workflow",
+      "minItems": 1,
+      "items": {
+        "allOf": [
+          { "$ref": "#/definitions/node_base" },
+          {
+            "if": { "properties": { "type": { "const": "action" } } },
+            "then": {
+              "properties": {
+                "action": {
+                  "type": "object",
+                  "required": ["integration", "operation"],
+                  "properties": {
+                    "integration": { "type": "string" },
+                    "operation": { "type": "string" },
+                    "params": { "type": "object", "additionalProperties": true },
+                    "auth": { "type": "string", "description": "Secret ref for auth credentials" }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": { "properties": { "type": { "const": "condition" } } },
+            "then": {
+              "properties": {
+                "condition_node": {
+                  "type": "object",
+                  "required": ["expression", "branches"],
+                  "properties": {
+                    "expression": { "type": "string" },
+                    "branches": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["case", "next"],
+                        "properties": {
+                          "case": { "type": "string", "description": "'true', 'false', or a value" },
+                          "next": { "type": "string", "description": "Next node ID" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": { "properties": { "type": { "const": "loop" } } },
+            "then": {
+              "properties": {
+                "loop": {
+                  "type": "object",
+                  "required": ["mode"],
+                  "properties": {
+                    "mode": { "type": "string", "enum": ["for_each", "while", "times"] },
+                    "collection": { "type": "string", "description": "Variable ref for for_each" },
+                    "item_variable": { "type": "string", "default": "item" },
+                    "index_variable": { "type": "string", "default": "index" },
+                    "condition": { "type": "string", "description": "CEL expression for while loops" },
+                    "count": { "type": "integer", "description": "Number of iterations for times loops" },
+                    "max_iterations": { "type": "integer", "default": 1000 },
+                    "concurrency": { "type": "integer", "minimum": 1, "default": 1 },
+                    "break_on": { "type": "string", "description": "Expression to break early" },
+                    "body_nodes": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "Node IDs that form the loop body"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": { "properties": { "type": { "const": "parallel" } } },
+            "then": {
+              "properties": {
+                "parallel": {
+                  "type": "object",
+                  "required": ["branches"],
+                  "properties": {
+                    "branches": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["id", "node_ids"],
+                        "properties": {
+                          "id": { "type": "string" },
+                          "name": { "type": "string" },
+                          "node_ids": {
+                            "type": "array",
+                            "items": { "type": "string" }
+                          }
+                        }
+                      }
+                    },
+                    "join_mode": {
+                      "type": "string",
+                      "enum": ["all", "any", "n_of_m"],
+                      "default": "all",
+                      "description": "all=wait for all; any=continue when first finishes; n_of_m=wait for N branches"
+                    },
+                    "join_n": {
+                      "type": "integer",
+                      "description": "Required when join_mode=n_of_m"
+                    },
+                    "max_concurrency": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": { "properties": { "type": { "const": "ai" } } },
+            "then": {
+              "properties": {
+                "ai": {
+                  "type": "object",
+                  "required": ["provider", "model", "prompt"],
+                  "properties": {
+                    "provider": {
+                      "type": "string",
+                      "enum": ["openai", "anthropic", "google", "groq", "mistral", "ollama", "custom"]
+                    },
+                    "model": { "type": "string" },
+                    "prompt": { "type": "string", "description": "Supports {{variable}} interpolation" },
+                    "system_prompt": { "type": "string" },
+                    "temperature": { "type": "number", "minimum": 0, "maximum": 2, "default": 0.7 },
+                    "max_tokens": { "type": "integer" },
+                    "tools": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "MCP tool names available to this AI node"
+                    },
+                    "response_format": {
+                      "type": "string",
+                      "enum": ["text", "json", "markdown", "structured"],
+                      "default": "text"
+                    },
+                    "response_schema": {
+                      "type": "object",
+                      "description": "JSON Schema for structured response validation"
+                    },
+                    "memory": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": { "type": "boolean", "default": false },
+                        "store": { "type": "string", "enum": ["in_memory", "redis", "chroma", "pinecone"] },
+                        "window": { "type": "integer", "description": "Number of previous messages to include" }
+                      }
+                    },
+                    "rag": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": { "type": "boolean", "default": false },
+                        "collection": { "type": "string" },
+                        "top_k": { "type": "integer", "default": 5 }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": { "properties": { "type": { "const": "human_approval" } } },
+            "then": {
+              "properties": {
+                "human_approval": {
+                  "type": "object",
+                  "required": ["approvers"],
+                  "properties": {
+                    "approvers": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "Email addresses or user IDs of required approvers"
+                    },
+                    "approval_mode": {
+                      "type": "string",
+                      "enum": ["any", "all", "majority"],
+                      "default": "any"
+                    },
+                    "instructions": { "type": "string" },
+                    "data_to_review": {
+                      "type": "object",
+                      "additionalProperties": { "type": "string" }
+                    },
+                    "expiry": { "$ref": "#/definitions/iso_duration" },
+                    "on_expiry": {
+                      "type": "string",
+                      "enum": ["fail", "auto_approve", "auto_reject", "escalate"],
+                      "default": "fail"
+                    },
+                    "escalation_approvers": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    },
+                    "channels": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["email", "slack", "teams"]
+                      },
+                      "description": "Channels to send the approval request"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": { "properties": { "type": { "const": "notification" } } },
+            "then": {
+              "properties": {
+                "notification": {
+                  "type": "object",
+                  "required": ["targets"],
+                  "properties": {
+                    "targets": {
+                      "type": "array",
+                      "items": { "$ref": "#/definitions/notification_target" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": { "properties": { "type": { "const": "webhook" } } },
+            "then": {
+              "properties": {
+                "webhook": {
+                  "type": "object",
+                  "required": ["url", "method"],
+                  "properties": {
+                    "url": { "type": "string" },
+                    "method": { "type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+                    "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+                    "body": {},
+                    "auth": {
+                      "type": "object",
+                      "properties": {
+                        "type": { "type": "string", "enum": ["none", "basic", "bearer", "oauth2", "api_key"] },
+                        "secret_ref": { "type": "string" }
+                      }
+                    },
+                    "follow_redirects": { "type": "boolean", "default": true },
+                    "verify_ssl": { "type": "boolean", "default": true },
+                    "expected_status_codes": {
+                      "type": "array",
+                      "items": { "type": "integer" },
+                      "default": [200, 201, 202]
+                    },
+                    "response_mapping": {
+                      "type": "object",
+                      "additionalProperties": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": { "properties": { "type": { "const": "transform" } } },
+            "then": {
+              "properties": {
+                "transform": {
+                  "type": "object",
+                  "required": ["mappings"],
+                  "properties": {
+                    "mappings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["target", "value"],
+                        "properties": {
+                          "target": { "type": "string" },
+                          "value": {}
+                        }
+                      }
+                    },
+                    "jq_filter": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": { "properties": { "type": { "const": "subworkflow" } } },
+            "then": {
+              "properties": {
+                "subworkflow": {
+                  "type": "object",
+                  "required": ["workflow_id"],
+                  "properties": {
+                    "workflow_id": { "type": "string" },
+                    "version": { "type": "string" },
+                    "input_mapping": { "type": "object", "additionalProperties": { "type": "string" } },
+                    "output_mapping": { "type": "object", "additionalProperties": { "type": "string" } },
+                    "wait_for_completion": { "type": "boolean", "default": true }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+
+    "on_success": {
+      "type": "array",
+      "description": "Nodes to run when the workflow completes successfully",
+      "items": { "$ref": "#/definitions/notification_target" }
+    },
+
+    "on_failure": {
+      "type": "array",
+      "description": "Nodes to run when the workflow fails",
+      "items": { "$ref": "#/definitions/notification_target" }
+    },
+
+    "execution_state": {
+      "type": "object",
+      "description": "Runtime execution state — populated by the workflow engine, not authored manually",
+      "additionalProperties": false,
+      "properties": {
+        "run_id": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "running", "paused", "succeeded", "failed", "cancelled", "timed_out"]
+        },
+        "started_at": { "type": "string", "format": "date-time" },
+        "finished_at": { "type": "string", "format": "date-time" },
+        "triggered_by": { "type": "string" },
+        "trigger_id": { "type": "string" },
+        "node_states": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "status": { "type": "string", "enum": ["pending", "running", "succeeded", "failed", "skipped", "timed_out", "awaiting_approval"] },
+              "started_at": { "type": "string", "format": "date-time" },
+              "finished_at": { "type": "string", "format": "date-time" },
+              "attempt": { "type": "integer" },
+              "error": {
+                "type": "object",
+                "properties": {
+                  "code": { "type": "string" },
+                  "message": { "type": "string" },
+                  "stack": { "type": "string" }
+                }
+              },
+              "outputs": { "type": "object" }
+            }
+          }
+        },
+        "variables": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Live variable values during execution"
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "code": { "type": "string" },
+            "message": { "type": "string" },
+            "node_id": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

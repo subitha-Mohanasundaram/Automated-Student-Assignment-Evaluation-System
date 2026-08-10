@@ -1,0 +1,69 @@
+{
+  "run_id": "run_e41238c49bbe",
+  "workflow_id": "test_rest_api",
+  "workflow_name": "Test REST API Live Execution",
+  "status": "succeeded",
+  "started_at": "2026-08-10T09:05:58.678297+00:00",
+  "finished_at": "2026-08-10T09:06:02.106053+00:00",
+  "node_states": {
+    "get_joke": {
+      "node_id": "get_joke",
+      "status": "success",
+      "started_at": "2026-08-10T09:05:58.689831+00:00",
+      "finished_at": "2026-08-10T09:06:02.106053+00:00",
+      "attempt": 1,
+      "outputs": {
+        "result": {
+          "status_code": 200,
+          "body": {
+            "type": "general",
+            "setup": "Did you hear about the guy whose whole left side was cut off?",
+            "punchline": "He's all right now.",
+            "id": 89
+          },
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "vary": "Accept-Encoding",
+            "x-powered-by": "Express",
+            "access-control-allow-origin": "*",
+            "etag": "W/\"84-BCMGoQCGiSe3nkKpsjeWeyqBjN8\"",
+            "content-encoding": "gzip",
+            "x-cloud-trace-context": "3331bd5547d803167b6f1443c11c93db",
+            "date": "Mon, 10 Aug 2026 09:06:00 GMT",
+            "server": "Google Frontend",
+            "alt-svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+            "transfer-encoding": "chunked"
+          },
+          "success": true
+        },
+        "success": true,
+        "error": null
+      },
+      "error": null
+    }
+  },
+  "logs": [
+    {
+      "ts": "2026-08-10T09:05:58.689831+00:00",
+      "level": "info",
+      "msg": "Starting workflow 'Test REST API Live Execution' run_id=run_e41238c49bbe"
+    },
+    {
+      "ts": "2026-08-10T09:05:58.689831+00:00",
+      "level": "info",
+      "msg": "Execution order: ['get_joke']"
+    },
+    {
+      "ts": "2026-08-10T09:05:58.689831+00:00",
+      "level": "info",
+      "msg": "[RUN] get_joke attempt 1/1 type=action"
+    },
+    {
+      "ts": "2026-08-10T09:06:02.106053+00:00",
+      "level": "info",
+      "msg": "[OK] get_joke"
+    }
+  ],
+  "variables": {},
+  "error": null
+}

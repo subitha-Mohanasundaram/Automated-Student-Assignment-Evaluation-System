@@ -1,0 +1,49 @@
+{
+  "run_id": "run_43f142268a5a",
+  "workflow_id": "test_comparison",
+  "workflow_name": "Test Dry-Run vs Live",
+  "status": "succeeded",
+  "started_at": "2026-08-10T09:07:38.537580+00:00",
+  "finished_at": "2026-08-10T09:07:38.541587+00:00",
+  "node_states": {
+    "http_call": {
+      "node_id": "http_call",
+      "status": "success",
+      "started_at": "2026-08-10T09:07:38.539633+00:00",
+      "finished_at": "2026-08-10T09:07:38.541587+00:00",
+      "attempt": 1,
+      "outputs": {
+        "result": {
+          "status": "simulated",
+          "integration": "rest_api",
+          "operation": "get"
+        }
+      },
+      "error": null
+    }
+  },
+  "logs": [
+    {
+      "ts": "2026-08-10T09:07:38.539633+00:00",
+      "level": "info",
+      "msg": "Starting workflow 'Test Dry-Run vs Live' run_id=run_43f142268a5a"
+    },
+    {
+      "ts": "2026-08-10T09:07:38.539633+00:00",
+      "level": "info",
+      "msg": "Execution order: ['http_call']"
+    },
+    {
+      "ts": "2026-08-10T09:07:38.539633+00:00",
+      "level": "info",
+      "msg": "[RUN] http_call attempt 1/1 type=action"
+    },
+    {
+      "ts": "2026-08-10T09:07:38.541587+00:00",
+      "level": "info",
+      "msg": "[OK] http_call"
+    }
+  ],
+  "variables": {},
+  "error": null
+}

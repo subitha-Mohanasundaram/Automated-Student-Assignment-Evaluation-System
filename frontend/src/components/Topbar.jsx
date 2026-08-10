@@ -1,6 +1,6 @@
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { getUser, logout } from '../lib/auth'
-import { Code2, BrainCircuit, LayoutDashboard, ListChecks, Trophy, LogOut, User } from 'lucide-react'
+import { Code2, BrainCircuit, LayoutDashboard, ListChecks, Trophy, LogOut, User, GitBranch, Settings2 } from 'lucide-react'
 
 export default function Topbar() {
   const user = getUser()
@@ -13,8 +13,10 @@ export default function Topbar() {
   }
 
   const navItems = [
-    { to: '/assignments', label: 'Problems', icon: ListChecks },
-    { to: '/me',          label: 'Dashboard', icon: LayoutDashboard },
+    { to: '/assignments',    label: 'Problems',  icon: ListChecks  },
+    { to: '/workflows',      label: 'Workflows', icon: GitBranch   },
+    { to: '/me',             label: 'Dashboard', icon: LayoutDashboard },
+    { to: '/plugin-settings',label: 'Plugins',   icon: Settings2   },
   ]
 
   return (
