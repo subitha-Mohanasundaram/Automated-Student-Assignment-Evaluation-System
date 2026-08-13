@@ -1,4 +1,4 @@
-# Mini-LeetCode (AI-Powered Assignment Evaluation Platform)
+# Mini-LeetCode  (AI-Powered Assignment Evaluation Platform)
 
 This repository is a production-style, local-first coding assignment platform:
 
